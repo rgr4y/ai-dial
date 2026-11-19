@@ -524,6 +524,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.bell = lv_obj_create(root);
   lv_obj_remove_style_all(u.bell);
   lv_obj_set_style_bg_color(u.bell, lv_color_hex(BLUE), 0);
+  // Vertical only: text 348 > card content 344 (border counts), so a sideways drag chained up and slid the card.
+  lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+  lv_obj_remove_flag(u.card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_opa(u.bell, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(u.bell, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_pad_hor(u.bell, 13, 0);
