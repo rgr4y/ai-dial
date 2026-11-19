@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="18" viewBox="55 8 20 18">
+  <!-- anger mark: four red arcs round an empty centre, above the head -->
+  <g fill="none" stroke="#e03a2c" stroke-width="2.4" stroke-linecap="round">
+    <path d="M57 15Q62 15 62 10"/><path d="M68 10Q68 15 73 15"/>
+    <path d="M57 19Q62 19 62 24"/><path d="M68 24Q68 19 73 19"/>
+  </g>
+</svg>

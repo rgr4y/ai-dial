@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="48" height="24" viewBox="42 46 48 24">
+  <!-- eyes-open plus brows slanting down to the centre -->
+  <g id="e"><rect x="44" y="54" width="9" height="16" rx="4.5" fill="#181010"/><rect x="46.2" y="56.2" width="3" height="3.3" rx="1" fill="#fffbef"/></g>
+  <polyline points="43.5 49 54.5 53" fill="none" stroke="#181010" stroke-width="3.2" stroke-linecap="round"/>
+  <use href="#e" x="35"/>
+  <polyline points="88.5 49 77.5 53" fill="none" stroke="#181010" stroke-width="3.2" stroke-linecap="round"/>
+</svg>

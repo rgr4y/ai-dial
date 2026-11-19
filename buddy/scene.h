@@ -139,7 +139,7 @@ inline Scene *flatten(const Scene &s) {
 // One playing scene: up to MAX_LAYERS layer images, up to 6 discs and (for the alert) a count label.
 // Create once on a parent; play() swaps the scene, tick() moves things only when the step changes.
 struct Player {
-  static constexpr int MAX_LAYERS = 8;
+  static constexpr int MAX_LAYERS = 10;
   lv_obj_t *layer[MAX_LAYERS] = {}, *disc[6] = {}, *count = nullptr;
   const Scene *sc = nullptr, *base = nullptr;
   int bias = 0;
