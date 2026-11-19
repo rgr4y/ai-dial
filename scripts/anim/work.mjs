@@ -16,7 +16,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { frameFile, raw565a8 } from './frames.mjs';
+import { PET_SCALE, frameFile, raw565a8, scaleScene } from './frames.mjs';
 import { render } from './render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -133,6 +133,7 @@ const layers = [
 export const scenes = {
   work: { name: 'claude_work', w: 117, h: 117, dx: 1, dy: -4, steps: STEPS, step_ms: STEP_MS, layers, discs: 0, disc: null, count_at: null },
 };
+scaleScene(PET_SCALE, sets, layers, scenes.work);
 
 // ---- write ---------------------------------------------------------------------------------------------------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

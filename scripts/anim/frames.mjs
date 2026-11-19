@@ -71,3 +71,31 @@ export function raw565a8({ w, h, rgba }) {
   }
   return raw;
 }
+
+// ---- scene scale ---------------------------------------------------------------------------------------------
+// Scenes are laid out at the original 1x art size. PET_SCALE then scales them at render time: frames render bigger
+// (the parts are vector, so they stay sharp), and positions and the scene box grow by the same factor about the box
+// origin, so the box centre stays centred on the glass. One factor for every parts-built scene keeps Clawd one size.
+export const PET_SCALE = 1.5;
+
+// An SVG frame at k times its size. Its canvas widens to whole pixels (transparent margin). A frame without a
+// viewBox (the 1x1 blank) stays as it is.
+export function scaleSvg(svg, k) {
+  return svg.replace(/<svg[^>]*>/, (t) => {
+    const vb = t.match(/\bviewBox="([^"]*)"/);
+    if (!vb) return t;
+    const [x, y, w, h] = vb[1].trim().split(/\s+/).map(Number);
+    const W = Math.ceil(w * k - 1e-9), H = Math.ceil(h * k - 1e-9);
+    return t.replace(/\bwidth="[^"]*"/, `width="${W}"`).replace(/\bheight="[^"]*"/, `height="${H}"`)
+      .replace(vb[0], `viewBox="${x} ${y} ${W / k} ${H / k}"`);
+  });
+}
+
+// Scale one scene in place: the frame sets it owns, its layers' positions and its box. A set shared with another
+// scene module is scaled by the module that owns it, so pass only this module's own sets.
+export function scaleScene(k, sets, layers, scene) {
+  const sz = (v) => Math.round(v * k);
+  for (const frames of Object.values(sets)) for (const f of frames) f.svg = scaleSvg(f.svg, k);
+  for (const l of layers) l.at = l.at.map(([x, y]) => [sz(x), sz(y)]);
+  Object.assign(scene, { w: sz(scene.w), h: sz(scene.h), dx: sz(scene.dx), dy: sz(scene.dy) });
+}

@@ -8,7 +8,7 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { frameFile, raw565a8 } from './frames.mjs';
+import { PET_SCALE, frameFile, raw565a8, scaleScene } from './frames.mjs';
 import { render } from './render.mjs';
 import { scenes as sendScenes, sets as sendSets } from './send.mjs';
 
@@ -59,6 +59,7 @@ const layers = [
 export const scenes = {
   deny_send: { name: 'claude_deny_send', w: 192, h: 109, dx: 0, dy: 14, steps: STEPS, step_ms: STEP_MS, layers, discs: 0, disc: null, count_at: null },
 };
+scaleScene(PET_SCALE, sets, layers, scenes.deny_send);  // own sets only: send's are scaled in send.mjs
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   rmSync(OUT, { recursive: true, force: true });
