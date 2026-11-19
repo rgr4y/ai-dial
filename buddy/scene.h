@@ -92,8 +92,15 @@ struct Player {
       if (sc) stop();
       return;
     }
-    if (s == sc && (!base_ || base_ == base))
+    if (s == sc && (!base_ || base_ == base)) {
+      // Same scene at a new bias (splash relax -50 -> face relax 4): move it, keep the animation phase.
+      if (bias_ != bias) {
+        bias = bias_;
+        last = -1;
+        tick(now);
+      }
       return;
+    }
     once = once_;
     ESP_LOGI("buddyui", "scene %s", s->name.c_str());
     sc = s;
