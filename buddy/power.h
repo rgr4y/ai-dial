@@ -34,4 +34,21 @@ struct Screen {
   bool take_sleep() { return std::exchange(sleep, false); }
 };
 
+// Battery page ink: red <=10%, yellow at 50%, green >=90%, linear RGB blend between.
+inline uint32_t battery_ink(int pct) {
+  constexpr uint32_t RED = 0xcd3131, YEL = 0xe5e510, GRN = 0x3fb950;
+  if (pct < 0) pct = 0;
+  if (pct > 100) pct = 100;
+  if (pct <= 10) return RED;
+  if (pct >= 90) return GRN;
+  uint32_t a = pct < 50 ? RED : YEL, b = pct < 50 ? YEL : GRN;
+  int lo = pct < 50 ? 10 : 50, span = 40, t = pct - lo;
+  uint32_t out = 0;
+  for (int sh = 16; sh >= 0; sh -= 8) {
+    int ca = (a >> sh) & 0xff, cb = (b >> sh) & 0xff;
+    out |= (uint32_t) (ca + (cb - ca) * t / span) << sh;
+  }
+  return out;
+}
+
 }  // namespace power

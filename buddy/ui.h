@@ -58,8 +58,8 @@ static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_
 
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
-enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE };
-static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage"};
+enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE, BATTERY };
+static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage", "battery"};
 
 struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: power.h
   Fonts f{};
@@ -84,6 +84,9 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   uint32_t entries_at = 0;
   bool usage_open = false;
   uint32_t usage_at = 0;
+  bool battery_open = false;
+  uint32_t battery_at = 0;
+  lv_obj_t *battery_page = nullptr, *battery_ring = nullptr, *battery_num = nullptr;  // battery page (BOOT after usage)
   std::string usage_key;  // usages_key the usage screen was built from
   std::string deferred_id;            // prompt the user put off with "later": face + alert until it changes
   bool was_running = false;
@@ -360,7 +363,7 @@ inline void publish_state() {
 inline void on_root(lv_event_t *e) {
   Ui &u = ui();
   lv_event_code_t code = lv_event_get_code(e);
-  bool closable = u.view == View::ENTRIES || u.view == View::USAGE;
+  bool closable = u.view == View::ENTRIES || u.view == View::USAGE || u.view == View::BATTERY;
   const char *t = nullptr;
   if (code == LV_EVENT_LONG_PRESSED) {
     t = "hold";  // face hold (650 ms, fires while still held): recent entries + stats
@@ -380,7 +383,7 @@ inline void on_card(lv_event_t *) { tap("card"); }
 inline void on_reopen(lv_event_t *) { tap("bell"); }  // the bell pill or alert bubble: open the put-off prompt again
 inline void on_decide(lv_event_t *e) { tap(lv_event_get_target_obj(e) == ui().btn_allow ? "allow" : "deny"); }
 
-// BOOT key: "later" on an open prompt, the usage screen from the face, back to the face from anything else.
+// BOOT key: "later" on an open prompt, the usage screen from the face, the battery page from usage, back to the face from anything else.
 inline void boot(uint32_t now) {
   Ui &u = ui();
   bool was_asleep = u.asleep;
@@ -391,9 +394,14 @@ inline void boot(uint32_t now) {
   } else if (u.view == View::FACE) {
     u.usage_open = true;
     u.usage_at = now;
+  } else if (u.view == View::USAGE) {
+    u.usage_open = false;
+    u.battery_open = true;
+    u.battery_at = now;
   } else {
     u.entries_open = false;
     u.usage_open = false;
+    u.battery_open = false;
   }
   update(now);
 }
@@ -425,6 +433,7 @@ inline void tap(const std::string &t) {
   } else if (t == "back") {
     u.entries_open = false;
     u.usage_open = false;
+    u.battery_open = false;
   }
   update(now);
 }
@@ -544,6 +553,27 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_size(u.usage, scene::W, scene::W);
   lv_obj_add_flag(u.usage, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_flag(u.usage, LV_OBJ_FLAG_HIDDEN);
+
+  // Battery page (BOOT, after usage): ring + big %, values set in update().
+  u.battery_page = lv_obj_create(root);
+  lv_obj_remove_style_all(u.battery_page);
+  lv_obj_set_size(u.battery_page, scene::W, scene::W);
+  lv_obj_add_flag(u.battery_page, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_flag(u.battery_page, LV_OBJ_FLAG_HIDDEN);
+  u.battery_ring = lv_arc_create(u.battery_page);
+  lv_obj_set_size(u.battery_ring, 384, 384);  // inside the arc-label band (radius ~194+), so the labels stay clear
+  lv_obj_center(u.battery_ring);
+  lv_arc_set_rotation(u.battery_ring, 270);   // starts at 12 o'clock
+  lv_arc_set_bg_angles(u.battery_ring, 0, 360);
+  lv_arc_set_range(u.battery_ring, 0, 100);
+  lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(CARD_RIM), LV_PART_MAIN);
+  lv_obj_remove_style(u.battery_ring, nullptr, LV_PART_KNOB);
+  lv_obj_remove_flag(u.battery_ring, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(u.battery_ring, LV_OBJ_FLAG_EVENT_BUBBLE);
+  u.battery_num = mk_label(u.battery_page, u.f.f96b, TEXT);
+  lv_obj_center(u.battery_num);
 
   // Arcs last so they draw on top.
   u.name_arc = mk_arc(root, u.f.f26m, true);
@@ -710,10 +740,12 @@ inline void update(uint32_t now) {
   if (u.deferred_id != s.prompt_id && !s.prompt_id.empty()) u.deferred_id.clear();
   if (u.entries_open && now - u.entries_at > ENTRIES_MS) u.entries_open = false;
   if (u.usage_open && now - u.usage_at > USAGE_SCREEN_MS) u.usage_open = false;
+  if (u.battery_open && now - u.battery_at > USAGE_SCREEN_MS) u.battery_open = false;
 
   View v = !live                                        ? View::BRAND
            : b->has_prompt() && u.deferred_id.empty()   ? View::PERMISSION
            : u.usage_open                               ? View::USAGE
+           : u.battery_open                             ? View::BATTERY
            : u.entries_open                             ? View::ENTRIES
                                                         : View::FACE;
   if (v == View::PERMISSION && u.view != View::PERMISSION) activity(now);  // a new question wakes the dial
@@ -730,15 +762,15 @@ inline void update(uint32_t now) {
   // Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
   struct Vis {
     Ui &u;
-    lv_obj_t *o[9];
-    bool want[9] = {};
-    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage} {}
+    lv_obj_t *o[10];
+    bool want[10] = {};
+    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage, ui_.battery_page} {}
     void on(lv_obj_t *x) {
-      for (int i = 0; i < 9; i++)
+      for (int i = 0; i < 10; i++)
         if (o[i] == x) want[i] = true;
     }
     ~Vis() {
-      for (int i = 0; i < 9; i++) show(o[i], want[i]);
+      for (int i = 0; i < 10; i++) show(o[i], want[i]);
       u.small_was = want[0];
       publish_state();
     }
@@ -791,6 +823,23 @@ inline void update(uint32_t now) {
     }
     arc_text(u.name_arc, "Usage", NAME);
     arc_text(u.status_arc, "Tap to close", RELAX_LINE);
+    return;
+  }
+
+  if (v == View::BATTERY) {
+    u.scene.stop();
+    u.alert.stop();
+    vis.on(u.battery_page);
+    int bat = u.battery ? u.battery() : -1;
+    uint32_t ink = bat >= 0 ? power::battery_ink(bat) : RELAX_LINE;
+    char t[8];
+    snprintf(t, sizeof(t), bat >= 0 ? "%d%%" : "--", bat);
+    set_text(u.battery_num, t);
+    lv_obj_set_style_text_color(u.battery_num, lv_color_hex(ink), 0);
+    lv_arc_set_value(u.battery_ring, bat >= 0 ? bat : 100);
+    lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(ink), LV_PART_INDICATOR);
+    arc_text(u.name_arc, "Battery", NAME);
+    arc_text(u.status_arc, u.on_usb && u.on_usb() ? "Charging" : "Tap to close", RELAX_LINE);
     return;
   }
 

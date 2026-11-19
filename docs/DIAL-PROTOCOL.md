@@ -60,7 +60,7 @@ Each line is one Claude desktop Hardware Buddy JSON object
 
 **ui** (v1). Fields that are not on screen are left out.
 ```json
-{"v":1, "view":"brand|face|permission|entries", "asleep":false,
+{"v":1, "view":"brand|face|permission|entries|usage|battery", "asleep":false,
  "name":"Claude",                                   // top arc
  "status":{"text":"Brewing… 0:12","color":"#00ff2f","shimmer":true},   // lower arc
  "scene":"claude_relax|claude_work|claude_build|claude_send",          // pet scene playing
@@ -85,7 +85,7 @@ Each target does exactly what the matching touch on the glass does (`buddy/ui.h`
 | `bell` | Reopen a put-off prompt. |
 | `card` | Dismiss the recap card. |
 | `hold` | Open the entries view (hold the face for 650 ms). |
-| `back` | Close the entries view. |
+| `back` | Close the entries, usage or battery view. |
 | `wake` | Wake the screen only. |
 | `screen` | PWR: screen on/off. |
 

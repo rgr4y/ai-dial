@@ -73,5 +73,16 @@ int main() {
   assert(!idle.idle_due(900000, 5000, 300000, true));
   assert(idle.idle_due(900001, 5000, 300000, false));
 
+  // battery_ink: anchors exact, blend between, clamped.
+  assert(power::battery_ink(10) == 0xcd3131 && power::battery_ink(50) == 0xe5e510 && power::battery_ink(90) == 0x3fb950);
+  assert(power::battery_ink(0) == 0xcd3131 && power::battery_ink(-5) == 0xcd3131);
+  assert(power::battery_ink(100) == 0x3fb950 && power::battery_ink(500) == 0x3fb950);
+  uint32_t c30 = power::battery_ink(30);  // halfway red -> yellow
+  for (int sh = 16; sh >= 0; sh -= 8) {
+    int r = (0xcd3131 >> sh) & 0xff, y = (0xe5e510 >> sh) & 0xff, c = (c30 >> sh) & 0xff;
+    assert(c >= (r < y ? r : y) && c <= (r < y ? y : r));
+  }
+  assert(c30 != 0xcd3131 && c30 != 0xe5e510);
+
   puts("power ok");
 }
