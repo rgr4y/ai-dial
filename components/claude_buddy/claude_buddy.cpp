@@ -54,8 +54,6 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     s.entries.clear();
     for (JsonVariant e : doc["entries"].as<JsonArray>())
       s.entries.emplace_back(e | "");
-    s.tokens = doc["tokens"] | (uint64_t) 0;
-    s.tokens_today = doc["tokens_today"] | (uint64_t) 0;
     s.usage = doc["usage"] | "";
     s.usage_pct = doc["usage_pct"] | 0u;
     s.usages.clear();

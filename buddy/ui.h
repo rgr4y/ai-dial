@@ -533,7 +533,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_event_cb(u.btn_deny, on_decide, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(u.btn_allow, on_decide, LV_EVENT_CLICKED, nullptr);
 
-  // Entries (face hold): recent transcript lines + sessions/tokens, in place of the Harness inbox.
+  // Entries (face hold): recent transcript lines + sessions, in place of the Harness inbox.
   u.list = lv_obj_create(root);
   lv_obj_remove_style_all(u.list);
   lv_obj_set_size(u.list, scene::W, scene::W);
@@ -810,8 +810,7 @@ inline void update(uint32_t now) {
     if (s.entries.empty()) t = "Nothing here yet.\n";
     set_text(u.list_text, t.c_str());
     char buf[64];
-    snprintf(buf, sizeof(buf), "%u session%s \xC2\xB7 %.1fk today", (unsigned) s.total, s.total == 1 ? "" : "s",
-             s.tokens_today / 1000.0);
+    snprintf(buf, sizeof(buf), "%u session%s", (unsigned) s.total, s.total == 1 ? "" : "s");
     arc_text(u.name_arc, "Recent", NAME);
     arc_text(u.status_arc, s.usage.empty() ? buf : s.usage.c_str(), RELAX_LINE);
     return;

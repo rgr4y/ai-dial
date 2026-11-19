@@ -126,7 +126,7 @@ export class Board {
     const working = all.filter((s) => s.status === 'working').sort((a, b) => b.at - a.at);
     const waiting = all.filter((s) => s.prompt).sort((a, b) => a.prompt.at - b.prompt.at);
     const hb = { total: all.length, running: working.length, waiting: waiting.length, msg: '',
-                 entries: this.entries, tokens: 0, tokens_today: 0 };
+                 entries: this.entries };
     if (waiting.length) {
       const p = waiting[0].prompt;
       hb.msg = `approve: ${p.tool}`;
