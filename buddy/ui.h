@@ -758,7 +758,7 @@ inline void build_usage() {
     label(u.f.f25, SECONDARY, "Loading usage\xE2\x80\xA6", 0, scene::C, scene::W, LV_TEXT_ALIGN_CENTER);
     return;
   }
-  constexpr int NAME_H = 36, ROW = 32, GAP = 18, X = 78, BX = 156, BW = 136;
+  constexpr int NAME_H = 36, ROW = 32, GAP = 18, X = 78, BX = 156, BW = 124, PX = BX + BW + 60;  // PX: percent right edge
   int total = GAP * ((int) cards.size() - 1);
   for (const auto &c : cards) total += NAME_H + ROW * (int) c.w.size();
   int y = scene::C - total / 2 + 6;
@@ -782,8 +782,8 @@ inline void build_usage() {
       lv_anim_start(&a);
       char pct[8];
       snprintf(pct, sizeof(pct), "%u%%", (unsigned) w.pct);
-      label(u.f.f20, ink, pct, 352 - 64, cy, 64, LV_TEXT_ALIGN_RIGHT);
-      label(u.f.f20, 0x7a7a86, w.reset, 360, cy, 62, LV_TEXT_ALIGN_RIGHT);
+      label(u.f.f20, ink, pct, PX - 64, cy, 64, LV_TEXT_ALIGN_RIGHT);
+      label(u.f.f20, 0x7a7a86, w.reset, PX + 6, cy, 84, LV_TEXT_ALIGN_RIGHT);  // fits "47h 59m", the longest leftText()
       y += ROW;
     }
     y += GAP;
