@@ -2,7 +2,6 @@
 // Claude Buddy state on the dial, fed by the dial bridge (bridge/dial-bridge.mjs) over the ESPHome native API.
 // Lines are the Claude desktop Hardware Buddy JSON (heartbeat snapshot, evt:turn); see docs/DIAL-PROTOCOL.md.
 // Permission answers go back out on a text sensor the bridge subscribes to.
-// (The BLE transport for Claude desktop is kept, unconfigured, in components/claude_buddy_ble.)
 #include <string>
 #include <vector>
 

@@ -3,7 +3,6 @@
 # (bridge/: Claude Code hooks + peon-ping adapters for Codex, Cursor, ...).
 # Board: dial-hardware.yaml. UI: buddy-ui.yaml. Desktop simulator of the same code: claude-buddy-sim.yaml.
 # Protocol: docs/DIAL-PROTOCOL.md.
-# The BLE transport for Claude desktop's Hardware Buddy is kept, unconfigured, in components/claude_buddy_ble.
 
 substitutions:
   name: claude-buddy

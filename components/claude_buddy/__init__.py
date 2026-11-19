@@ -1,7 +1,7 @@
 """Claude Buddy state on the dial, fed over Wi-Fi by the dial bridge (bridge/dial-bridge.mjs).
 
 The bridge calls the `buddy_line` API action with Hardware Buddy JSON lines; permission answers are published on
-`decision_sensor`. Protocol: docs/DIAL-PROTOCOL.md. The BLE transport is kept, unconfigured, in claude_buddy_ble.
+`decision_sensor`. Protocol: docs/DIAL-PROTOCOL.md.
 """
 from esphome import automation
 import esphome.codegen as cg

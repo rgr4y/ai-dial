@@ -9,8 +9,7 @@ Teardown notes for the Autonomous "Harness" device (a Waveshare ESP32-S3-Touch-A
   - It draws Harness's Claude face (pets, curved name and status text with the status shimmer, cards) and a
     permission screen with allow/deny. The status comes from `bridge/`, a Node daemon fed by Claude Code hooks
     and peon-ping adapters.
-  - Board package: `dial-hardware.yaml`. Component: `components/claude_buddy/` (the BLE variant is in
-    `components/claude_buddy_ble/`, unconfigured). UI: `buddy/`.
+  - Board package: `dial-hardware.yaml`. Component: `components/claude_buddy/`. UI: `buddy/`.
   - Docs: `docs/DIAL-PROTOCOL.md` (protocol), `docs/HARNESS-UI-SPEC.md` (UI spec), `bridge/README.md` (daemon
     and simulator).
   - UI package shared with the simulator: `buddy-ui.yaml`. Simulator: `claude-buddy-sim.yaml` (ESPHome `host` +
