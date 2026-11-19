@@ -27,7 +27,7 @@ import { homedir } from 'node:os';
 import { join, normalize, sep } from 'node:path';
 import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
-import { conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
+import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
 
 const { Client, ServiceArgType } = esphome;
 const HOSTS = (process.env.DIAL_HOST || '10.0.0.11').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
@@ -255,6 +255,7 @@ function heartbeat(dial) {
   const hb = board.heartbeat(Date.now());
   const assets = assetsLine(dial);
   if (assets) hb.assets = assets;
+  if (grokBots.length) hb.bots = grokBots;
   if (usage) Object.assign(hb, { usage: usage.text, usage_pct: usage.pct, ...(usageScreen && { usages: usages.map((u) => u.card) }) });
   return hb;
 }
@@ -321,10 +322,11 @@ server.listen(PORT, '127.0.0.1', () => log(`listening on 127.0.0.1:${PORT}, dial
 dials.forEach(connectDial);
 
 // ---- Grok Bot store (read-only) ----
+let grokBots = [];  // botLooks of every roster: the idle face cycles Clawd and these
 // The app rewrites whole blob files; fs.watch fires several times per write, so debounce per file.
 function watchGrokBot(dir) {
   if (!existsSync(dir)) return log(`grok bot store not found, skipping: ${dir}`);
-  const names = new Map();   // conversation uuid -> bot name, merged over every account's roster
+  const names = new Map();   // conversation uuid -> { name, avatar, color }, merged over every account's roster
   const rosters = new Map(); // file -> Map
   const seqs = new Map();    // transcript file -> last seq seen
   const timers = new Map();
@@ -332,6 +334,8 @@ function watchGrokBot(dir) {
     rosters.set(f, readRoster(join(dir, f)));
     names.clear();
     for (const r of rosters.values()) for (const [k, v] of r) names.set(k, v);
+    grokBots = botLooks(names);
+    push();
   };
   const kind = (f) => {
     const key = decodeKey(f);
@@ -347,7 +351,7 @@ function watchGrokBot(dir) {
     const { events, lastSeq } = eventsSince(join(dir, f), seqs.get(f) ?? -1, names);
     seqs.set(f, lastSeq);
     if (!events.length) return;
-    log(`grok ${names.get(conversationId(decodeKey(f))) || 'Grok Bot'}: ${events.length} events`);
+    log(`grok ${names.get(conversationId(decodeKey(f)))?.name || 'Grok Bot'}: ${events.length} events`);
     events.forEach(onEvent);
   };
   watch(dir, (_type, f) => {

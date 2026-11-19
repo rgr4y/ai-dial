@@ -28,13 +28,35 @@ function base32(s) {
 
 const readJson = (path) => JSON.parse(readFileSync(path, 'utf8'));
 
-// roster blob -> Map<conversation uuid, name>. Empty map on a bad file.
+// The app's avatar picker: roster shape name -> outline name (its o_), colour id -> swatch. Black draws white on the
+// app's dark theme, and on the dial. Empty shape/colour is the app's default, blob/black.
+const SHAPE_ALIAS = { blob: 'sphere', flower: 'starFlower', heart: 'heartChubby', star: 'star6' };
+const SWATCH = { black: 0xFFFFFF, brown: 0x936439, red: 0xFF263C, orange: 0xFF6700, yellow: 0xFF9800, green: 0x00C972,
+                 cyan: 0x00BCA6, blue: 0x1084FE, violet: 0x9159FE, magenta: 0xFF309B, gray: 0x777777 };
+
+// roster blob -> Map<conversation uuid, { name, avatar, color, group }>; avatar is an art/grok shape, color 0xRRGGBB.
+// Group chats are rows too (isGroup, memberIds): they keep their name but have no bot look of their own.
+// Empty map on a bad file.
 export function readRoster(path) {
   const m = new Map();
   try {
-    for (const r of readJson(path).value.rows) if (r?.id && r.name) m.set(r.id, r.name);
+    for (const r of readJson(path).value.rows) {
+      if (!r?.id || !r.name) continue;
+      const shape = r.avatarShape || 'blob';
+      const group = !!r.isGroup, gone = !!(r.isHiddenFromSidebar || r.isRemovedFromSidebar);
+      m.set(r.id, group ? { name: r.name, group }
+        : { name: r.name, avatar: SHAPE_ALIAS[shape] ?? shape, color: SWATCH[r.avatarColor] ?? SWATCH.black, ...(gone && { gone }) });
+    }
   } catch { /* partial write or wrong shape */ }
   return m;
+}
+
+// Every distinct bot in a readRoster map, roster order: [[avatar, color, name], ...]. The dial's idle face cycles them.
+// Not group chats, nor bots hidden or removed from the app's sidebar.
+export function botLooks(names) {
+  const seen = new Map();
+  for (const b of names.values()) if (!b.group && !b.gone) seen.set(`${b.avatar}/${b.color}/${b.name}`, [b.avatar, b.color, b.name]);
+  return [...seen.values()];
 }
 
 export function conversationId(key) {
@@ -75,7 +97,9 @@ export function eventsSince(path, afterSeq, names = new Map()) {
   const seqOf = (e) => (typeof e.seq === 'number' ? e.seq : -Infinity);
   const fresh = entries.filter((e) => e && seqOf(e) > afterSeq)
     .sort((a, b) => seqOf(a) - seqOf(b) || (a.timestampMs ?? 0) - (b.timestampMs ?? 0));
-  const base = { session_id: 'grok-bot:' + uuid, cwd: '/grok/' + (names.get(uuid) || 'Grok Bot') };
+  const bot = names.get(uuid);
+  const base = { session_id: 'grok-bot:' + uuid, cwd: '/grok/' + (bot?.name || 'Grok Bot'),
+                 ...(!bot?.group && { avatar: bot?.avatar ?? 'sphere', avatar_color: bot?.color ?? SWATCH.black }) };
   const events = [];
   for (const e of fresh) {
     const ev = toEvent(e);

@@ -83,3 +83,18 @@ test('Grok pending ask is display-only: waiting, no prompt, cleared by resolve o
   b.event(ev('Stop'), 4000);
   assert.deepEqual([b.sessions.get('s1').status, b.heartbeat(4000).watching], ['idle', undefined]);
 });
+
+test('a Grok Bot session busy shows its avatar; a Claude session does not', () => {
+  const b = new Board();
+  b.event(ev('UserPromptSubmit', { avatar: 'cloud', avatar_color: 0x00BCA6 }), 1000);
+  b.event(ev('PreToolUse', { tool_name: 'run-command' }), 1500);  // later events carry it too; the session keeps it
+  let hb = b.heartbeat(1500);
+  assert.deepEqual([hb.avatar, hb.avatar_color, hb.avatar_name], ['cloud', 0x00BCA6, 'proj']);
+  b.event(ev('UserPromptSubmit', { session_id: 's2', cwd: '/w/other' }), 2000);
+  hb = b.heartbeat(2000);
+  assert.equal(hb.msg, 'other');
+  assert.equal(hb.avatar, undefined);
+  b.event(ev('Stop', { session_id: 's2' }), 3000);
+  b.event(ev('Stop'), 3000);
+  assert.equal(b.heartbeat(3000).avatar, undefined);
+});

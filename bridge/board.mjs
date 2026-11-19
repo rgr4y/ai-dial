@@ -40,6 +40,7 @@ export class Board {
       this.sessions.set(ev.session_id, s);
     }
     if (ev.cwd) s.project = basename(ev.cwd);
+    if (ev.avatar) { s.avatar = ev.avatar; s.avatar_color = ev.avatar_color ?? 0xFFFFFF; }  // Grok Bot: its bot's look
     s.at = now;
     s.promptOnly = false;
     return s;
@@ -150,6 +151,7 @@ export class Board {
     } else if (working.length) {
       const w = working[0];
       hb.msg = w.tool ? `${w.project} ${w.tool}` : w.project;
+      if (w.avatar) Object.assign(hb, { avatar: w.avatar, avatar_color: w.avatar_color, avatar_name: w.project });
     }
     return hb;
   }

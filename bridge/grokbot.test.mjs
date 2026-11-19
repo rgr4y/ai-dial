@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { decodeKey, readRoster, conversationId, eventsSince } from './grokbot.mjs';
+import { decodeKey, readRoster, botLooks, conversationId, eventsSince } from './grokbot.mjs';
 
 const b32 = (s) => {
   const A = 'abcdefghijklmnopqrstuvwxyz234567';
@@ -18,7 +18,7 @@ const UUID = '11111111-2222-3333-4444-555555555555';
 const KEY = 'sand.client.slice.account.acme.transcript.replicas.' + UUID;
 const put = (name, body) => { const p = join(dir, name); writeFileSync(p, body); return p; };
 const blob = (entries) => put(b32(KEY), JSON.stringify({ schemaVersion: 1, value: { entries } }));
-const names = new Map([[UUID, 'Pal']]);
+const names = new Map([[UUID, { name: 'Pal', avatar: 'cloud', color: 0x00BCA6 }]]);
 const RID = 'ab'.repeat(32);
 
 test('base32 round trip and bad names', () => {
@@ -30,9 +30,15 @@ test('base32 round trip and bad names', () => {
 });
 
 test('roster map', () => {
-  const p = put('roster', JSON.stringify({ value: { rows: [{ id: 'a', name: 'A' }, { id: 'b' }] } }));
-  assert.deepEqual([...readRoster(p)], [['a', 'A']]);
+  const p = put('roster', JSON.stringify({ value: { rows: [{ id: 'a', name: 'A' }, { id: 'b' },
+    { id: 'c', name: 'C', avatarShape: 'flower', avatarColor: 'violet' }, { id: 'd', name: 'D', avatarShape: 'wedge' },
+    { id: 'g', name: 'G', isGroup: true, memberIds: ['a', 'c'] }, { id: 'h', name: 'H', isRemovedFromSidebar: true }] } }));
+  assert.deepEqual([...readRoster(p)], [['a', { name: 'A', avatar: 'sphere', color: 0xFFFFFF }],
+    ['c', { name: 'C', avatar: 'starFlower', color: 0x9159FE }], ['d', { name: 'D', avatar: 'wedge', color: 0xFFFFFF }],
+    ['g', { name: 'G', group: true }], ['h', { name: 'H', avatar: 'sphere', color: 0xFFFFFF, gone: true }]]);
   assert.equal(readRoster(join(dir, 'missing')).size, 0);
+  assert.deepEqual(botLooks(new Map([...readRoster(p), ['e', { name: 'D', avatar: 'wedge', color: 0xFFFFFF }]])),
+    [['sphere', 0xFFFFFF, 'A'], ['starFlower', 0x9159FE, 'C'], ['wedge', 0xFFFFFF, 'D']]);
 });
 
 test('mappings, ordering, seq filter, streaming', () => {
@@ -56,7 +62,8 @@ test('mappings, ordering, seq filter, streaming', () => {
   assert.deepEqual(r.events.map((e) => e.hook_event_name), ['UserPromptSubmit', 'Stop', 'Stop', 'PreToolUse',
     'GrokPermissionPending', 'GrokPermissionResolved']);
   assert.deepEqual(r.events[4], { hook_event_name: 'GrokPermissionPending', tool_name: 'run-command',
-    tool_input: { command: 'echo hi' }, request_id: RID, session_id: 'grok-bot:' + UUID, cwd: '/grok/Pal' });
+    tool_input: { command: 'echo hi' }, request_id: RID, session_id: 'grok-bot:' + UUID, cwd: '/grok/Pal',
+    avatar: 'cloud', avatar_color: 0x00BCA6 });
   assert.equal(r.events[5].request_id, RID);
   assert.equal(r.events[1].last_assistant_message, 'hi');
   assert.equal(r.events[2].last_assistant_message, 'done');
@@ -70,6 +77,8 @@ test('mappings, ordering, seq filter, streaming', () => {
   assert.equal(r2.events[0].hook_event_name, 'PreToolUse');
   assert.equal(eventsSince(p, 10, names).lastSeq, 10);
   assert.equal(eventsSince(p, -1).events[0].cwd, '/grok/Grok Bot');
+  assert.equal(eventsSince(p, -1).events[0].avatar, 'sphere');
+  assert.equal(eventsSince(p, -1, new Map([[UUID, { name: 'Team', group: true }]])).events[0].avatar, undefined);
 });
 
 test('truncated JSON does not throw', () => {
