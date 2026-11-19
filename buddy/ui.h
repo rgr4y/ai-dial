@@ -94,6 +94,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   uint32_t entries_at = 0;
   bool usage_open = false;
   uint32_t usage_at = 0;
+  bool loading = false;  // boot pack load in progress: LVGL is blocked, so no shimmer (it would freeze mid-sweep)
   bool battery_open = false;
   uint32_t battery_at = 0;
   bool ota_on = false;       // OTA page up (from ota(), until 5 s after a failure)
@@ -954,7 +955,7 @@ inline void update(uint32_t now) {
 #endif
     arc_text(u.name_arc, "", NAME);
     arc_text(u.status_arc, !wifi ? "Connecting to Wi-Fi" : u.was_live ? "Bridge offline" : "Looking for the bridge",
-             SECONDARY, true);
+             SECONDARY, !u.loading);
     return;
   }
 

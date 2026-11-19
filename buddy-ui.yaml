@@ -22,6 +22,7 @@ esphome:
       then:
         - lambda: |-
             bool fs = character::mount();
+            buddyui::ui().loading = true;
             buddyui::init(${ui_root}, id(buddy), {
                 id(inter_20)->get_lv_font(), id(inter_25)->get_lv_font(), id(inter_26m)->get_lv_font(),
                 id(inter_30)->get_lv_font(), id(inter_48b)->get_lv_font(),
@@ -32,6 +33,7 @@ esphome:
             lv_refr_now(nullptr);  // wordmark and Wi-Fi text on the glass before the pack load
             // Relax (4 frames) first, drawn as a still pet over the wordmark; the rest of the pack then blocks for seconds.
             if (fs) character::load("claude", [] { buddyui::update(millis()); lv_refr_now(nullptr); });
+            buddyui::ui().loading = false;  // the Wi-Fi text starts shimmering on the next update()
 
 claude_buddy:
   id: buddy
