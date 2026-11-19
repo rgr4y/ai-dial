@@ -993,15 +993,17 @@ inline void update(uint32_t now) {
     vis.on(u.battery_page);
     int bat = u.battery ? u.battery() : -1;
     uint32_t ink = bat >= 0 ? power::battery_ink(bat) : RELAX_LINE;
-    char t[8];
-    snprintf(t, sizeof(t), bat >= 0 ? "%d%%" : "--", bat);
+    char t[12];
+    snprintf(t, sizeof(t), bat >= 0 ? "%d%%" : "No battery", bat);
     set_text(u.battery_num, t);
+    lv_obj_set_style_text_font(u.battery_num, bat >= 0 ? u.f.f96b : u.f.f30, 0);  // f96b has digits and % only
     lv_obj_set_style_text_color(u.battery_num, lv_color_hex(ink), 0);
     lv_arc_set_value(u.battery_ring, bat >= 0 ? bat : 100);
     lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(ink), LV_PART_INDICATOR);
     bool usb = u.on_usb && u.on_usb();
     arc_text(u.name_arc, "Battery", NAME);
-    if (usb) arc_text(u.status_arc, "Charging", LIVE, true);  // green working-line shimmer
+    if (usb && bat >= 0) arc_text(u.status_arc, "Charging", LIVE, true);  // green working-line shimmer
+    else if (usb) arc_text(u.status_arc, "USB power", RELAX_LINE);
     else arc_text(u.status_arc, "Tap to close", RELAX_LINE);
     return;
   }
