@@ -10,6 +10,7 @@
 #include <cstring>
 #include <functional>
 #include <string>
+#include <strings.h>
 
 #include "character.h"
 #include "scene.h"
@@ -26,6 +27,17 @@ using esphome::claude_buddy::ClaudeBuddy;
 static constexpr uint32_t TEXT = 0xefe7de, SECONDARY = 0xada6ad, ACCENT = 0xc6aaef, SELECTION = 0x392c4a,
                           ERROR = 0xe7a6ad, NAME = 0xeaeaf0, RECAP = 0xd6d6d2, CARD = 0x1c1e26, CARD_RIM = 0x3d3f47,
                           RELAX_LINE = 0x9a9aa6, LIVE = 0x00ff2f, BLUE = 0x006fff;
+
+// AI provider colours, picked to read on black. Brand-derived: Claude terracotta, Copilot the light end of the
+// Microsoft 365 blue, Codex OpenAI green. Grok's brand is black and white, so a cool silver that still differs
+// from TEXT. Unknown names get TEXT.
+inline uint32_t provider_ink(const std::string &name) {
+  static const struct { const char *name; uint32_t ink; } INKS[] = {
+      {"claude", 0xd97757}, {"copilot", 0x4ba6f5}, {"codex", 0x10a37f}, {"grok", 0xb4bfd4}};
+  for (const auto &p : INKS)
+    if (strncasecmp(name.c_str(), p.name, strlen(p.name)) == 0) return p.ink;
+  return TEXT;
+}
 
 // ---- timings ----
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
@@ -638,7 +650,7 @@ inline void show_card(const std::string &text, uint32_t now) {
 
 // Usage screen layout: per provider its name, then a row per rate window: label,
 // bar (grows in over 500 ms), percent, time to reset. Block centred vertically.
-inline uint32_t usage_ink(uint32_t pct) { return pct >= 95 ? USAGE_HOT : pct >= 80 ? USAGE_WARN : RECAP; }
+inline uint32_t usage_ink(uint32_t pct, uint32_t base) { return pct >= 95 ? USAGE_HOT : pct >= 80 ? USAGE_WARN : base; }
 inline void build_usage() {
   Ui &u = ui();
   const auto &cards = u.buddy->snap().usages;
@@ -672,11 +684,12 @@ inline void build_usage() {
   for (const auto &c : cards) total += NAME_H + ROW * (int) c.w.size();
   int y = scene::C - total / 2 + 6;
   for (const auto &c : cards) {
-    label(u.f.f26m, TEXT, c.name, X, y + NAME_H / 2, 300, LV_TEXT_ALIGN_LEFT);
+    uint32_t brand = provider_ink(c.name);
+    label(u.f.f26m, brand, c.name, X, y + NAME_H / 2, 300, LV_TEXT_ALIGN_LEFT);
     y += NAME_H;
     for (const auto &w : c.w) {
       int cy = y + ROW / 2;
-      uint32_t ink = usage_ink(w.pct);
+      uint32_t ink = usage_ink(w.pct, brand);  // bar and percent in the brand colour until 80%
       label(u.f.f20, RELAX_LINE, w.label, X, cy, 72, LV_TEXT_ALIGN_LEFT);
       bar(BX, cy, BW, 0x2a2c34);
       lv_obj_t *fill = bar(BX, cy, 10, ink);
