@@ -203,7 +203,7 @@ function fromClaudeScript() {
     try {
       const u = JSON.parse(readFileSync(USAGE_CACHE, 'utf8'));
       const h5 = Math.round(u.five_hour?.utilization ?? 0), d7 = Math.round(u.seven_day?.utilization ?? 0);
-      setUsages([{ text: `5h ${h5}% · 7d ${d7}%${untilText(u.five_hour?.resets_at)}`, pct: Math.max(h5, d7),
+      setUsages([{ text: `Claude 5h ${h5}% · 7d ${d7}%${untilText(u.five_hour?.resets_at)}`, pct: Math.max(h5, d7),
                    card: { n: 'Claude', w: [['5h', h5, leftText(u.five_hour?.resets_at)], ['7d', d7, leftText(u.seven_day?.resets_at)]] } }]);
     } catch {}
   });

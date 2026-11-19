@@ -33,12 +33,13 @@ static constexpr uint32_t TEXT = 0xefe7de, SECONDARY = 0xada6ad, ACCENT = 0xc6aa
 // AI provider colours, picked to read on black. Brand-derived: Claude terracotta, Copilot the light end of the
 // Microsoft 365 blue, Codex OpenAI green. Grok's brand is black and white, so a cool silver that still differs
 // from TEXT. Unknown names get TEXT.
-inline uint32_t provider_ink(const std::string &name) {
+// Brand colour for text that starts with a provider name ("Claude", "Grok 21% · 3d"); `other` if none matches.
+inline uint32_t provider_ink(const std::string &name, uint32_t other = TEXT) {
   static const struct { const char *name; uint32_t ink; } INKS[] = {
       {"claude", 0xd97757}, {"copilot", 0x4ba6f5}, {"codex", 0x10a37f}, {"grok", 0xb4bfd4}};
   for (const auto &p : INKS)
     if (strncasecmp(name.c_str(), p.name, strlen(p.name)) == 0) return p.ink;
-  return TEXT;
+  return other;
 }
 
 // ---- timings ----
@@ -50,6 +51,8 @@ static constexpr uint32_t SEND_MS = 2400;       // claude_send (posting a letter
 static constexpr uint32_t GERUND_MS = 6000;     // focus.c:760
 static constexpr uint32_t USAGE_EVERY_MS = 15000, USAGE_SHOW_MS = 3000;  // plan usage flashes on the lower arc
 static constexpr uint32_t USAGE_WARN = 0xe5e510, USAGE_HOT = 0xcd3131;   // theme question / failed inks
+// From 80% the brand colour gives way to warning yellow, from 95% to red.
+inline uint32_t usage_ink(uint32_t pct, uint32_t base) { return pct >= 95 ? USAGE_HOT : pct >= 80 ? USAGE_WARN : base; }
 static constexpr int SPLASH_BIAS = -50;      // splash: pet sits above the wordmark
 static constexpr uint32_t USAGE_ALARM_PCT = 80;  // at or above: the flash also pulses a big red % mid-screen
 static constexpr int RECAP_MAX = 2000;          // codepoints; focus.c:793 cut at 90, the card now scrolls instead
@@ -752,7 +755,6 @@ inline void show_card(const std::string &text, uint32_t now) {
 
 // Usage screen layout: per provider its name, then a row per rate window: label,
 // bar (grows in over 500 ms), percent, time to reset. Block centred vertically.
-inline uint32_t usage_ink(uint32_t pct, uint32_t base) { return pct >= 95 ? USAGE_HOT : pct >= 80 ? USAGE_WARN : base; }
 inline void build_usage() {
   Ui &u = ui();
   const auto &cards = u.buddy->snap().usages;
@@ -919,7 +921,7 @@ inline void update(uint32_t now) {
     return;
   }
 
-  arc_text(u.name_arc, name, NAME);
+  arc_text(u.name_arc, name, provider_ink(name, NAME));
 
   if (v == View::PERMISSION) {
     u.scene.stop();
@@ -978,7 +980,7 @@ inline void update(uint32_t now) {
     char buf[64];
     snprintf(buf, sizeof(buf), "%u session%s", (unsigned) s.total, s.total == 1 ? "" : "s");
     arc_text(u.name_arc, "Recent", NAME);
-    arc_text(u.status_arc, s.usage.empty() ? buf : s.usage.c_str(), RELAX_LINE);
+    arc_text(u.status_arc, s.usage.empty() ? buf : s.usage.c_str(), provider_ink(s.usage, RELAX_LINE));
     return;
   }
 
@@ -1033,8 +1035,7 @@ inline void update(uint32_t now) {
   // Plan usage: 3 s of every 15 s on the lower arc, over whatever the face shows there (Harness's display carries
   // "what your harness has spent today"; this is the plan's 5-hour / weekly use from the bridge).
   if (!s.usage.empty() && !sending && now % USAGE_EVERY_MS < USAGE_SHOW_MS) {
-    uint32_t col = s.usage_pct >= 95 ? USAGE_HOT : s.usage_pct >= 80 ? USAGE_WARN : RELAX_LINE;
-    arc_text(u.status_arc, s.usage.c_str(), col);
+    arc_text(u.status_arc, s.usage.c_str(), usage_ink(s.usage_pct, provider_ink(s.usage, RELAX_LINE)));
     // Nearly out: the pet steps aside for a pulsing red percentage (no scared/alarmed pet art exists in Harness).
     if (s.usage_pct >= USAGE_ALARM_PCT && !recap) {
       u.scene.stop();
