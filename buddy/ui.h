@@ -959,7 +959,7 @@ inline void update(uint32_t now) {
     return;
   }
 
-  arc_text(u.name_arc, name, provider_ink(name, NAME));
+  if (v != View::FACE) arc_text(u.name_arc, name, provider_ink(name, NAME));  // the face names whoever it shows
 
   if (v == View::PERMISSION) {
     u.scene.stop();
@@ -1025,6 +1025,7 @@ inline void update(uint32_t now) {
   }
 
   // ---- FACE (spec §2.9) ----
+  const esphome::claude_buddy::Bot *shown = nullptr;  // a Grok bot on the face instead of Clawd: its name tops the face
   bool recap = !running && !b->last_text().empty() && b->last_text_ms() > u.recap_cleared;
   bool waiting = s.waiting > 0;  // only reachable here once the prompt was put off
   // Finger still on the reply (scrolled within CARD_MANUAL_MS): keep it up through a new turn; tick() hands back.
@@ -1043,8 +1044,16 @@ inline void update(uint32_t now) {
     vis.on(u.card);
     vis.on(u.small);
   } else if (running) {
-    const scene::Scene *sc = u.build ? character::find("build") : character::find("work");
-    u.scene.play(sc, now, 4);
+    // A busy Grok Bot session shows its own bot (bridge heartbeat `avatar`), else Clawd cooks or builds.
+    const scene::Scene *sc = s.avatar.shape.empty() ? nullptr : character::find(("grok_" + s.avatar.shape).c_str());
+    if (sc) {
+      u.scene.play(sc, now, 4);
+      u.scene.set_tint(s.avatar.rgb);
+      shown = &s.avatar;
+    } else {
+      sc = u.build ? character::find("build") : character::find("work");
+      u.scene.play(sc, now, 4);
+    }
     if (waiting) {
       // Alert bubble on the working face, count = waiting prompts (spec §4: semantic shift from "other agents").
       u.alert.play(character::find("alert"), now, 4, sc, true);
@@ -1072,9 +1081,19 @@ inline void update(uint32_t now) {
     arc_text(u.status_arc, "", RELAX_LINE);
   } else {
     u.alert.stop();
-    u.scene.play(character::find("relax"), now, 4);
+    // Idle: Clawd juggles, then each known Grok bot gets a turn, switching as each usage flash starts.
+    const scene::Scene *sc = character::find("relax");
+    size_t n = live ? s.bots.size() + 1 : 1, k = now / USAGE_EVERY_MS % n;
+    const scene::Scene *bot = k ? character::find(("grok_" + s.bots[k - 1].shape).c_str()) : nullptr;
+    u.scene.play(bot ? bot : sc, now, 4);
+    if (bot) {
+      u.scene.set_tint(s.bots[k - 1].rgb);
+      shown = &s.bots[k - 1];
+    }
     arc_text(u.status_arc, waiting ? "" : u.hint, RELAX_LINE);  // hint left out while the bell shows
   }
+  if (shown && !shown->name.empty()) arc_text(u.name_arc, shown->name.c_str(), shown->rgb);
+  else arc_text(u.name_arc, name, provider_ink(name, NAME));
   // Plan usage: 3 s of every 15 s on the lower arc, over whatever the face shows there (Harness's display carries
   // "what your harness has spent today"; this is the plan's 5-hour / weekly use from the bridge).
   if (!s.usage.empty() && !sending && now % USAGE_EVERY_MS < USAGE_SHOW_MS) {

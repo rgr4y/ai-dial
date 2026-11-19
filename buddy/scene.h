@@ -36,6 +36,7 @@ struct Scene {
   uint8_t discs = 0;
   std::vector<Disc> disc;                    // per step: discs entries
   std::vector<std::array<int16_t, 2>> count_at;  // alert: where the waiting count goes
+  int8_t tint = -1;                          // layer drawn in Player::set_tint's colour (Grok avatars); -1 none
 };
 // Small pet above the recap card: zoom 6/8 and 4/8 frame sets, one (frame, dy) loop.
 struct Small {
@@ -65,6 +66,7 @@ struct Player {
   uint32_t t0 = 0;
   int last = -1;
   bool once = false;
+  uint32_t tinted = UINT32_MAX;  // set_tint's colour on this scene; UINT32_MAX none (styles cost a redraw, set once)
 
   void create(lv_obj_t *parent, bool with_count = false) {
     for (auto &l : layer)
@@ -110,13 +112,24 @@ struct Player {
     last = -1;
     if (s->layers.size() > MAX_LAYERS)
       ESP_LOGE("buddyui", "scene %s has %u layers, drawing the first %d", s->name.c_str(), (unsigned) s->layers.size(), MAX_LAYERS);
-    for (size_t i = 0; i < MAX_LAYERS; i++)
+    for (size_t i = 0; i < MAX_LAYERS; i++) {
       (i < s->layers.size() ? lv_obj_remove_flag : lv_obj_add_flag)(layer[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_style_image_recolor_opa(layer[i], LV_OPA_TRANSP, 0);
+    }
+    tinted = UINT32_MAX;
     for (int i = 0; i < 6; i++)
       (i < s->discs ? lv_obj_remove_flag : lv_obj_add_flag)(disc[i], LV_OBJ_FLAG_HIDDEN);
     if (count)
       (!s->count_at.empty() ? lv_obj_remove_flag : lv_obj_add_flag)(count, LV_OBJ_FLAG_HIDDEN);
     tick(now);
+  }
+  // Paint the scene's tint layer (white art) in rgb. After play(); a new scene clears it.
+  void set_tint(uint32_t rgb) {
+    if (!sc || sc->tint < 0 || sc->tint >= MAX_LAYERS || rgb == tinted)
+      return;
+    tinted = rgb;
+    lv_obj_set_style_image_recolor(layer[sc->tint], lv_color_hex(rgb), 0);
+    lv_obj_set_style_image_recolor_opa(layer[sc->tint], LV_OPA_COVER, 0);
   }
   void stop() {
     sc = nullptr;

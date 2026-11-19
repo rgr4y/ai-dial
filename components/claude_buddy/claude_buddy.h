@@ -11,6 +11,13 @@
 
 namespace esphome::claude_buddy {
 
+// A Grok Bot bot: art/grok shape (pack scene "grok_<shape>"), colour 0xRRGGBB, name.
+struct Bot {
+  std::string shape;
+  uint32_t rgb = 0xFFFFFF;
+  std::string name;
+};
+
 // One provider on the usage screen: rate windows of (label, percent used, time to reset).
 struct UsageCard {
   struct Win {
@@ -32,6 +39,8 @@ struct Snapshot {
   std::vector<UsageCard> usages;  // only while the dial shows the usage screen (bridge sends it then)
   std::string usages_key;         // usages as raw JSON: the UI rebuilds when it changes
   std::string assets_url, assets_rev;  // character pack the bridge serves (buddy/character.h)
+  Bot avatar;             // busy Grok Bot session's bot; shape empty otherwise
+  std::vector<Bot> bots;  // every known Grok bot: the idle face cycles them
   uint32_t at_ms = 0;                               // millis() of the last heartbeat; 0 = never
 };
 

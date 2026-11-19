@@ -212,6 +212,7 @@ inline bool load(const char *name, void (*first)() = nullptr) {
     for (JsonVariantConst l : o["layers"].as<JsonArrayConst>())
       s.layers.push_back({set(l["set"]), ints<uint8_t>(l["loop"]), pairs<int16_t>(l["at"])});
     s.count_at = pairs<int16_t>(o["count_at"]);
+    s.tint = o["tint"] | -1;
     s.discs = o["discs"] | 0;
     s.disc.clear();
     for (JsonVariantConst d : o["disc"].as<JsonArrayConst>())

@@ -39,6 +39,13 @@ Each line is one Claude desktop Hardware Buddy JSON object
    "prompt":{"id":"p3-mwm6…","tool":"Bash","hint":"api: rm -rf /tmp/x"}}
   ```
   `prompt` is the oldest waiting permission. It is absent when nothing is waiting.
+  `"avatar":"cloud","avatar_color":48294` appear when the session shown as working is a Grok Bot one: its bot's
+  shape (a pack scene `grok_<avatar>`, from `art/grok/`) and colour (0xRRGGBB, from the roster). The dial plays
+  that scene with its body tinted, in place of cook or build. Any hook event that carries `avatar` and
+  `avatar_color` gives its session that look, so `curl` can test it.
+  `"bots":[["cloud",48294],["wedge",16750592]]` lists every distinct Grok bot look in the rosters (absent with no
+  Grok Bot). The idle face takes turns: Clawd's relax, then each bot tinted, switching every 15 s as the usage flash
+  starts.
   The bridge adds `"usage":"Claude 5h 17% · 7d 19% · 2h 33m","usage_pct":19`: one provider's plan utilisation
   plus time to its reset. The source is CodexBar's HTTP server (`GET http://127.0.0.1:6969/usage`, override with
   `CODEXBAR_URL`; loopback needs no token), polled every minute, one entry per enabled provider that returned

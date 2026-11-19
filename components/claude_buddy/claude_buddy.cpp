@@ -70,6 +70,10 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     }
     s.assets_url = doc["assets"]["url"] | "";
     s.assets_rev = doc["assets"]["rev"] | "";
+    s.avatar = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
+    s.bots.clear();
+    for (JsonArray b : doc["bots"].as<JsonArray>())
+      s.bots.push_back({b[0] | "", b[1] | 0xFFFFFFu, b[2] | ""});
     JsonObject p = doc["prompt"];
     s.prompt_id = p ? (p["id"] | "") : "";
     if (!s.prompt_id.empty() && s.prompt_id == this->answered_id_)
