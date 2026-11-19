@@ -43,6 +43,26 @@ wifi:
     subnet: 255.255.254.0
     dns1: 10.0.1.1
 
+# Update progress page (buddy/ui.h ota()). Extends the base OTA: same-port esphome entries merge, password kept.
+# The upload blocks the main loop, so the 50 ms interval doesn't run: wake the panel here, and ota() draws itself.
+ota:
+  - platform: esphome
+    on_begin:
+      - lambda: |-
+          id(lvgl_comp).set_paused(false, false);
+          auto c = id(display_brightness).turn_on();
+          c.set_transition_length(0);
+          c.perform();
+          buddyui::ota(1, 0, 0);
+    on_progress:
+      - lambda: buddyui::ota(2, x, 0);
+    on_end:
+      - lambda: buddyui::ota(0, 100, 0);
+    on_error:
+      - lambda: buddyui::ota(4, 0, x);
+    on_abort:
+      - lambda: buddyui::ota(3, 0, 0);
+
 # NS4150B amp enable: no audio in this config, so hold it off rather than leave GPIO46 floating.
 switch:
   - platform: gpio

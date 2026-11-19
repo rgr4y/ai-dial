@@ -49,6 +49,8 @@ inline uint32_t provider_ink(const std::string &name, uint32_t other = TEXT) {
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
 static constexpr uint32_t BOOT_AWAKE_MS = 60000; // never idle-sleep in the first minute after boot
 static constexpr uint32_t ENTRIES_MS = 15000;   // the entries view drops back to the face
+static constexpr uint32_t OTA_FAIL_MS = 5000;  // failed-update page stays this long
+static constexpr int OTA_BAR_W = 300, OTA_BAR_MIN = 14;
 static constexpr uint32_t USAGE_SCREEN_MS = 30000;  // the usage screen (BOOT) drops back to the face
 static constexpr uint32_t SEND_MS = 2400;       // claude_send (posting a letter) after answering, one loop
 static constexpr uint32_t GERUND_MS = 6000;     // focus.c:760
@@ -66,8 +68,8 @@ static constexpr uint32_t CARD_MANUAL_MS = 5000;
 
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
-enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE, BATTERY };
-static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage", "battery"};
+enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE, BATTERY, OTA };
+static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage", "battery", "ota"};
 
 struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: power.h
   Fonts f{};
@@ -98,6 +100,9 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   uint32_t usage_at = 0;
   bool battery_open = false;
   uint32_t battery_at = 0;
+  bool ota_on = false;       // OTA page up (from ota(), until 5 s after a failure)
+  uint32_t ota_fail_at = 0;  // when the update failed; 0 = running or rebooting
+  lv_obj_t *ota_page = nullptr, *ota_fill = nullptr, *ota_pct = nullptr;
   lv_obj_t *battery_page = nullptr, *battery_ring = nullptr, *battery_num = nullptr;  // battery page (BOOT after usage)
   lv_obj_t *bat_arc = nullptr, *bat_bolt = nullptr;  // face-side battery %, left edge; charging bolt after it
   std::string bat_txt;
@@ -641,6 +646,27 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.battery_num = mk_label(u.battery_page, u.f.f96b, TEXT);
   lv_obj_center(u.battery_num);
 
+  // OTA page: big % and a rect bar (like the usage bars), text on the arcs; values set by ota().
+  u.ota_page = lv_obj_create(root);
+  lv_obj_remove_style_all(u.ota_page);
+  lv_obj_set_size(u.ota_page, scene::W, scene::W);
+  lv_obj_add_flag(u.ota_page, LV_OBJ_FLAG_HIDDEN);
+  u.ota_pct = mk_label(u.ota_page, u.f.f96b, TEXT);
+  lv_label_set_text(u.ota_pct, "0%");
+  lv_obj_align(u.ota_pct, LV_ALIGN_CENTER, 0, -30);
+  auto ota_rect = [&](int w, uint32_t col) {
+    lv_obj_t *o = lv_obj_create(u.ota_page);
+    lv_obj_remove_style_all(o);
+    lv_obj_set_size(o, w, 14);
+    lv_obj_set_pos(o, (scene::W - OTA_BAR_W) / 2, scene::C + 50);
+    lv_obj_set_style_radius(o, 7, 0);
+    lv_obj_set_style_bg_color(o, lv_color_hex(col), 0);
+    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+    return o;
+  };
+  ota_rect(OTA_BAR_W, 0x2a2c34);
+  u.ota_fill = ota_rect(OTA_BAR_MIN, provider_ink("Claude"));
+
   // Arcs last so they draw on top.
   u.name_arc = mk_arc(root, u.f.f26m, true);
   u.status_arc = mk_arc(root, u.f.f26m, false);
@@ -845,8 +871,10 @@ inline void update(uint32_t now) {
   if (u.entries_open && now - u.entries_at > ENTRIES_MS) u.entries_open = false;
   if (u.usage_open && now - u.usage_at > USAGE_SCREEN_MS) u.usage_open = false;
   if (u.battery_open && now - u.battery_at > USAGE_SCREEN_MS) u.battery_open = false;
+  if (u.ota_on && u.ota_fail_at && now - u.ota_fail_at > OTA_FAIL_MS) u.ota_on = false, u.ota_fail_at = 0;
 
-  View v = !live                                        ? View::BRAND
+  View v = u.ota_on                                     ? View::OTA
+           : !live                                      ? View::BRAND
            : b->has_prompt() && u.deferred_id.empty()   ? View::PERMISSION
            : u.usage_open                               ? View::USAGE
            : u.battery_open                             ? View::BATTERY
@@ -891,21 +919,28 @@ inline void update(uint32_t now) {
   // Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
   struct Vis {
     Ui &u;
-    lv_obj_t *o[10];
-    bool want[10] = {};
-    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage, ui_.battery_page} {}
+    lv_obj_t *o[11];
+    bool want[11] = {};
+    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
     void on(lv_obj_t *x) {
-      for (int i = 0; i < 10; i++)
+      for (int i = 0; i < 11; i++)
         if (o[i] == x) want[i] = true;
     }
     ~Vis() {
-      for (int i = 0; i < 10; i++) show(o[i], want[i]);
+      for (int i = 0; i < 11; i++) show(o[i], want[i]);
       u.small_was = want[0];
       publish_state();
     }
   } vis{u};
   bool sending = now - u.sent_at < SEND_MS && u.sent_at;
   const char *name = "Claude";
+
+  if (v == View::OTA) {  // ota() owns the widgets and arcs; nothing else may change the page
+    u.scene.stop();
+    u.alert.stop();
+    vis.on(u.ota_page);
+    return;
+  }
 
   if (v == View::BRAND) {
     // Splash (redesign of spec §2.1): the pet idling above the wordmark, and what the dial is waiting on
@@ -1192,6 +1227,40 @@ inline void tick(uint32_t now) {
     update(now);
   }
   if (u.idle_due(now, BOOT_AWAKE_MS, SLEEP_MS, u.on_usb && u.on_usb())) set_asleep(true);
+}
+
+// OTA progress, called from the esphome OTA triggers (claude-buddy.yaml): 1 begin, 2 progress (pct), 0 end,
+// 3 abort, 4 error (err). The upload blocks the main loop (no interval, no LVGL timer), so each call
+// draws the page itself with lv_refr_now.
+inline void ota(int state, float pct, uint8_t err) {
+  Ui &u = ui();
+  if (!u.root) return;
+  uint32_t now = esphome::millis();
+  if (state == 1) {  // wake without the fade: the YAML already turned the panel on and unpaused LVGL
+    activity(now);
+    u.wake = u.sleep = false;
+    u.ota_on = true;
+    u.ota_fail_at = 0;
+    arc_text(u.name_arc, "Updating", NAME);
+    arc_text(u.status_arc, "Receiving firmware", RELAX_LINE);
+    update(now);
+  } else if (!u.ota_on) {
+    return;
+  }
+  if (state == 3 || state == 4) {
+    u.ota_fail_at = now;
+    char t[32] = "Update failed";
+    if (state == 4) snprintf(t, sizeof(t), "Update failed (%u)", (unsigned) err);
+    arc_text(u.status_arc, t, ERROR);
+  } else if (state != 1) {
+    int p = state == 0 ? 100 : std::max(0, std::min(100, (int) (pct + 0.5f)));
+    char t[8];
+    snprintf(t, sizeof(t), "%d%%", p);
+    set_text(u.ota_pct, t);
+    lv_obj_set_width(u.ota_fill, std::max(OTA_BAR_MIN, OTA_BAR_W * p / 100));
+    if (state == 0) arc_text(u.status_arc, "Rebooting", RELAX_LINE);
+  }
+  lv_refr_now(nullptr);
 }
 
 // YAML hooks, polled from the 50 ms interval: take_wake() -> fade the panel in, take_sleep() -> fade it out.

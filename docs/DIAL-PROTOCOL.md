@@ -60,7 +60,7 @@ Each line is one Claude desktop Hardware Buddy JSON object
 
 **ui** (v1). Fields that are not on screen are left out.
 ```json
-{"v":1, "view":"brand|face|permission|entries|usage|battery", "asleep":false,
+{"v":1, "view":"brand|face|permission|entries|usage|battery|ota", "asleep":false,
  "name":"Claude",                                   // top arc
  "status":{"text":"Brewing… 0:12","color":"#00ff2f","shimmer":true},   // lower arc
  "scene":"claude_relax|claude_work|claude_build|claude_send",          // pet scene playing
