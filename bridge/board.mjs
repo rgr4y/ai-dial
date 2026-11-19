@@ -11,7 +11,7 @@ export const STALE_MS = 30 * 60 * 1000;   // a working session silent this long 
 export const FORGET_MS = 6 * 60 * 60 * 1000; // dropped entirely after this
 
 const WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
-                                'SubagentStart', 'SubagentStop', 'PreCompact']);
+                                'SubagentStart', 'SubagentStop', 'PreCompact', 'GrokPermissionResolved']);
 
 // One-line summary of a tool call for the permission screen and the entries list.
 export function summarize(tool, input) {
@@ -36,7 +36,7 @@ export class Board {
     let s = this.sessions.get(ev.session_id);
     if (!s) {
       s = { project: basename(ev.cwd || '') || ev.session_id.slice(0, 8), status: 'idle', at: now, tool: '', hint: '',
-            prompt: null };
+            prompt: null, pending: null };
       this.sessions.set(ev.session_id, s);
     }
     if (ev.cwd) s.project = basename(ev.cwd);
@@ -67,7 +67,13 @@ export class Board {
       out.cleared = s.prompt.id;
       s.prompt = null;
     }
-    if (WORKING_EVENTS.has(name)) {
+    // Display-only wait (Grok Bot): no answer path, so no prompt and no held hook. Any other event clears it.
+    s.pending = null;
+    if (name === 'GrokPermissionPending') {
+      s.status = 'waiting';
+      s.pending = { tool: ev.tool_name || 'tool', hint: summarize(ev.tool_name, ev.tool_input), at: now };
+      this._entry(now, s.project, `asks ${s.pending.tool}`);
+    } else if (WORKING_EVENTS.has(name)) {
       s.status = 'working';
       if (ev.tool_name) {
         s.tool = ev.tool_name;
@@ -125,12 +131,16 @@ export class Board {
     const all = [...this.sessions.values()];
     const working = all.filter((s) => s.status === 'working').sort((a, b) => b.at - a.at);
     const waiting = all.filter((s) => s.prompt).sort((a, b) => a.prompt.at - b.prompt.at);
+    // Read-only waits (no allow/deny): count and first project, so the dial can show "waiting on the Mac".
+    const pend = all.filter((s) => s.pending).sort((a, b) => a.pending.at - b.pending.at);
     const hb = { total: all.length, running: working.length, waiting: waiting.length, msg: '',
-                 entries: this.entries };
+                 entries: this.entries, ...(pend.length && { watching: pend.length }) };
     if (waiting.length) {
       const p = waiting[0].prompt;
       hb.msg = `approve: ${p.tool}`;
       hb.prompt = { id: p.id, tool: p.tool, hint: p.hint };
+    } else if (pend.length) {
+      hb.msg = `${pend[0].project} waiting on the Mac`;
     } else if (working.length) {
       const w = working[0];
       hb.msg = w.tool ? `${w.project} ${w.tool}` : w.project;

@@ -54,3 +54,18 @@ test('plainText strips markdown, tables and code', () => {
   assert.equal(plainText(md), 'Fast connect works now. Times: Wi-Fi: see fast_connect docs');
   assert.equal(plainText('| a |\n|---|'), '');
 });
+
+test('Grok pending ask is display-only: waiting, no prompt, cleared by resolve or any later event', () => {
+  const b = new Board();
+  b.event(ev('GrokPermissionPending', { tool_name: 'run-command', tool_input: { command: 'echo hi' }, request_id: 'ab'.repeat(32) }), 1000);
+  let hb = b.heartbeat(1000);
+  assert.equal(b.sessions.get('s1').status, 'waiting');
+  assert.deepEqual([hb.waiting, hb.running, hb.watching, hb.prompt], [0, 0, 1, undefined]);
+  assert.equal(hb.msg, 'proj waiting on the Mac');
+  b.event(ev('GrokPermissionResolved', { request_id: 'ab'.repeat(32) }), 2000);
+  hb = b.heartbeat(2000);
+  assert.deepEqual([b.sessions.get('s1').status, hb.watching, hb.running], ['working', undefined, 1]);
+  b.event(ev('GrokPermissionPending', { tool_name: 'run-command' }), 3000);
+  b.event(ev('Stop'), 4000);
+  assert.deepEqual([b.sessions.get('s1').status, b.heartbeat(4000).watching], ['idle', undefined]);
+});

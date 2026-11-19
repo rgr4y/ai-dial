@@ -51,8 +51,13 @@ function toEvent(e) {
   } else if (e.kind === 'send-message') {
     const m = e.message;
     if (m?.type === 'text' && text(m.content)) return { hook_event_name: 'Stop', last_assistant_message: m.content };
-    if (m?.type === 'local-tool-permission' && m.ask)
-      return { hook_event_name: 'PreToolUse', tool_name: m.ask.action, tool_input: { command: m.ask.target } };
+    if (m?.type === 'local-tool-permission' && m.ask) {
+      const a = m.ask, call = { tool_name: a.action, tool_input: { command: a.target } };
+      if (a.status === 'pending') return { hook_event_name: 'GrokPermissionPending', ...call, request_id: a.requestId };
+      if (a.status === 'allowed' || a.status === 'always') return { hook_event_name: 'PreToolUse', ...call };
+      if (['expired', 'denied', 'never'].includes(a.status))
+        return { hook_event_name: 'GrokPermissionResolved', request_id: a.requestId };
+    }
   }
   return null;
 }

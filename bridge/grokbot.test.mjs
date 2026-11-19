@@ -19,6 +19,7 @@ const KEY = 'sand.client.slice.account.acme.transcript.replicas.' + UUID;
 const put = (name, body) => { const p = join(dir, name); writeFileSync(p, body); return p; };
 const blob = (entries) => put(b32(KEY), JSON.stringify({ schemaVersion: 1, value: { entries } }));
 const names = new Map([[UUID, 'Pal']]);
+const RID = 'ab'.repeat(32);
 
 test('base32 round trip and bad names', () => {
   assert.equal(decodeKey(b32(KEY)), KEY);
@@ -44,20 +45,30 @@ test('mappings, ordering, seq filter, streaming', () => {
     { kind: 'send-message', seq: 6, timestampMs: 6, message: { type: 'local-tool-permission',
       ask: { action: 'run-command', target: 'ls', status: 'allowed' } } },
     { kind: 'notice', seq: 7, timestampMs: 7 },
+    { kind: 'send-message', seq: 8, timestampMs: 8, message: { type: 'local-tool-permission',
+      ask: { requestId: RID, action: 'run-command', target: 'echo hi', status: 'pending' } } },
+    { kind: 'send-message', seq: 9, timestampMs: 9, message: { type: 'local-tool-permission',
+      ask: { requestId: RID, action: 'run-command', target: 'echo hi', status: 'expired' } } },
+    { kind: 'send-message', seq: 10, timestampMs: 10, message: { type: 'local-tool-permission',
+      ask: { requestId: RID, action: 'run-command', target: 'echo hi', status: 'bogus' } } },
   ]);
   const r = eventsSince(p, -1, names);
-  assert.deepEqual(r.events.map((e) => e.hook_event_name), ['UserPromptSubmit', 'Stop', 'Stop', 'PreToolUse']);
+  assert.deepEqual(r.events.map((e) => e.hook_event_name), ['UserPromptSubmit', 'Stop', 'Stop', 'PreToolUse',
+    'GrokPermissionPending', 'GrokPermissionResolved']);
+  assert.deepEqual(r.events[4], { hook_event_name: 'GrokPermissionPending', tool_name: 'run-command',
+    tool_input: { command: 'echo hi' }, request_id: RID, session_id: 'grok-bot:' + UUID, cwd: '/grok/Pal' });
+  assert.equal(r.events[5].request_id, RID);
   assert.equal(r.events[1].last_assistant_message, 'hi');
   assert.equal(r.events[2].last_assistant_message, 'done');
   assert.deepEqual(r.events[3].tool_input, { command: 'ls' });
   assert.equal(r.events[3].tool_name, 'run-command');
   assert.equal(r.events[0].session_id, 'grok-bot:' + UUID);
   assert.equal(r.events[0].cwd, '/grok/Pal');
-  assert.equal(r.lastSeq, 7);
+  assert.equal(r.lastSeq, 10);
   const r2 = eventsSince(p, 4, names);
-  assert.equal(r2.events.length, 1);
+  assert.equal(r2.events.length, 3);
   assert.equal(r2.events[0].hook_event_name, 'PreToolUse');
-  assert.equal(eventsSince(p, 7, names).lastSeq, 7);
+  assert.equal(eventsSince(p, 10, names).lastSeq, 10);
   assert.equal(eventsSince(p, -1).events[0].cwd, '/grok/Grok Bot');
 });
 
