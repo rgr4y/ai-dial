@@ -132,12 +132,21 @@ inline lv_obj_t *mk_label(lv_obj_t *parent, const lv_font_t *font, uint32_t colo
   lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
   return l;
 }
+// Size an arclabel to x,y,w,h and keep its arc centred on the glass centre. center_offset is uint32_t but is added
+// in 32-bit maths (lv_arclabel.c:509-510), so a negative offset wraps back to the right point.
+inline void arc_band(lv_obj_t *a, int x, int y, int w, int h) {
+  lv_obj_set_pos(a, x, y);
+  lv_obj_set_size(a, w, h);
+  lv_arclabel_set_center_offset_x(a, (uint32_t) (scene::C - (x + w / 2)));
+  lv_arclabel_set_center_offset_y(a, (uint32_t) (scene::C - (y + h / 2)));
+}
 inline lv_obj_t *mk_arc(lv_obj_t *parent, const lv_font_t *font, bool top) {
   // spec §2 Common, Arcs: Inter Medium 26, name on the top arc from y 12, status on the matching lower arc,
   // ~390 px span. Clockwise over the top and counter-clockwise under the bottom so both read left to right.
   lv_obj_t *a = lv_arclabel_create(parent);
-  lv_obj_set_size(a, scene::W, scene::W);
-  lv_obj_set_pos(a, 0, 0);
+  // Only the band the text uses (+ ~24 px for rotated glyphs): a full-screen arclabel made every shimmer step
+  // (~15/s) invalidate and redraw the whole glass, pet included.
+  arc_band(a, 0, top ? 0 : 316, scene::W, 150);
   lv_obj_set_style_text_font(a, font, 0);
   // Harness centres both labels (terminal.c:730 s16 = pen + adv/2 - total/2) on radius 205 (name) / 202 (status),
   // text band about 194-213 px from the centre (terminal.c:691 ARC_PROP_MID, :744-748).
@@ -515,6 +524,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_ELASTIC);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
   lv_obj_set_scroll_dir(u.card_text, LV_DIR_VER);
+  // Vertical only: text 348 > card content 344 (border counts), so a sideways drag chained up and slid the card.
+  lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
+  lv_obj_remove_flag(u.card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_PRESSED, nullptr);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_SCROLL, nullptr);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_RELEASED, nullptr);
@@ -524,9 +536,6 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.bell = lv_obj_create(root);
   lv_obj_remove_style_all(u.bell);
   lv_obj_set_style_bg_color(u.bell, lv_color_hex(BLUE), 0);
-  // Vertical only: text 348 > card content 344 (border counts), so a sideways drag chained up and slid the card.
-  lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
-  lv_obj_remove_flag(u.card, LV_OBJ_FLAG_SCROLLABLE);
   lv_obj_set_style_bg_opa(u.bell, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(u.bell, LV_RADIUS_CIRCLE, 0);
   lv_obj_set_style_pad_hor(u.bell, 13, 0);
@@ -632,6 +641,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.bat_arc = mk_arc(root, u.f.f26m, true);
   lv_arclabel_set_angle_start(u.bat_arc, 150);
   lv_arclabel_set_angle_size(u.bat_arc, 60);
+  arc_band(u.bat_arc, 0, 100, 100, 266);  // r 205 at 150..210 deg: x ~12-72, y ~114-352
   lv_arclabel_set_recolor(u.bat_arc, true);  // per-letter colour for the charging shimmer
   lv_obj_add_flag(u.bat_arc, LV_OBJ_FLAG_HIDDEN);
   // Charging bolt after the side %: a stroked zigzag (Inter has no bolt glyph), turned to follow the arc text.
