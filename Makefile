@@ -12,7 +12,7 @@ export DIAL_ASSETS
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c  # tee must not hide a failed build
 
-.PHONY: sim flash dialip test test\:cpp test\:node
+.PHONY: sim flash dialip test test\:cpp test\:node logs
 # .env.dialip empty or missing: look the dial up on the network and record it. Otherwise nothing to do.
 dialip:
 	@[ -s .env.dialip ] || { ip=$$(scripts/find-dial.sh) && echo "$$ip" > .env.dialip && echo "dial at $$ip (.env.dialip)"; }
@@ -42,3 +42,7 @@ flash: dialip
 	@mkdir -p build
 	ip=$(or $(DIAL),$$(cat .env.dialip)); \
 	esphome run claude-buddy.yaml --device $$ip --no-logs 2>&1 | tee build/flash.log && echo "$$ip" > .env.dialip
+
+logs: dialip
+	ip=$(or $(DIAL),$$(cat .env.dialip)); \
+	esphome logs claude-buddy.yaml --device $$ip --no-states
