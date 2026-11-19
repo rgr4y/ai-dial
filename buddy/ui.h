@@ -552,7 +552,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
 
   // Brand / pairing (spec §5): wordmark "Claude" in Inter Bold 48 on a 50 px line at y 208.
   u.word = mk_label(root, u.f.f48b, TEXT);
-  set_text(u.word, "Claude");
+  set_text(u.word, "Otto");
   lv_obj_align(u.word, LV_ALIGN_TOP_MID, 0, 262);
   u.sub = mk_label(root, u.f.f25, SECONDARY);
   lv_obj_set_width(u.sub, 340);
