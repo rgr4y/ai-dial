@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="88" height="70" viewBox="17 29 88 70">
+  <!-- Clawd torso, no eyes/arms/legs. Device px, scene coords (frame 0). -->
+  <rect x="17" y="29" width="88" height="70" rx="7" fill="#bd5d42"/>
+  <rect x="17" y="29" width="83.5" height="63" rx="7" fill="#d67552"/>
+  <path d="M62.3 36.2H25V62" fill="none" stroke="#ef9673" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M17.5 35.5A7 7 0 0 1 24.5 29.5H96.5A8 8 0 0 1 104.5 37.5V91.5" fill="none" stroke="#6b3c29"/>
+  <path d="M104.5 91.5A7 7 0 0 1 97.5 98.5H24.5A7 7 0 0 1 17.5 91.5" fill="none" stroke="#291810"/>
+</svg>

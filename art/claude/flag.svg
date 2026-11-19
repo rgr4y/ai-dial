@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="28" height="10" viewBox="0 0 28 10">
+  <!-- Mailbox flag lying flat; pivot is the ball at (2.5, 3). send.mjs rotates it about that point. -->
+  <rect x="4" y="0" width="13" height="1" fill="#280a08"/>
+  <rect x="5" y="1" width="12" height="4" fill="#a52418"/>
+  <ellipse cx="2.5" cy="3" rx="2.4" ry="2.9" fill="#949aa5" stroke="#3c3d40" stroke-width=".5" stroke-opacity=".6"/>
+  <rect x="17" y="0" width="10" height="10" fill="#391008"/>
+  <rect x="17" y="1" width="10" height="8" fill="#de4129"/>
+  <rect x="27" y="1" width="1" height="8" fill="#ad3021"/>
+</svg>

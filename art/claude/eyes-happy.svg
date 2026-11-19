@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="54" height="12" viewBox="34 55 54 12">
+  <!-- ^ ^ -->
+  <g id="e"><polyline points="36.2 65.8 43 58 50.6 65.8" fill="none" stroke="#181010" stroke-width="3.8" stroke-linecap="round" stroke-linejoin="round"/></g>
+  <use href="#e" x="35"/>
+</svg>

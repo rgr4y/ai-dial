@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="17" height="47" viewBox="0 6 17 47">
+  <!-- Raised arm, f00 scene coords (tail of the pose). The torso covers its lower end. -->
+  <polyline points="6.5 12.5 10 30 12.75 44" fill="none" stroke="#bd5d42" stroke-width="11.5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

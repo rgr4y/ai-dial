@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="46" height="16" viewBox="43 54 46 16">
+  <g id="e"><rect x="44" y="54" width="9" height="16" rx="4.5" fill="#181010"/><rect x="46.2" y="56.2" width="3" height="3.3" rx="1" fill="#fffbef"/></g>
+  <use href="#e" x="35"/>
+</svg>
