@@ -4,7 +4,7 @@
 //   origin = ((466 - w) / 2 + dx, 233 - h / 2 + bias + dy)          (focus.c:374)
 //   body at origin + (0, step_dy[step]); overlay at origin + ov_at[step]; discs at origin + (cx, cy) / 16
 // An "attached" scene (the alert bubble) has no body and borrows the origin of the scene it sits on (focus.c:961).
-// Pure maths is host-testable with -DSCENE_NO_LVGL (test_buddy.cpp).
+// Pure maths is host-testable with -DSCENE_NO_LVGL (tests/test_buddy.cpp).
 #include <array>
 #include <cstdint>
 #include <string>

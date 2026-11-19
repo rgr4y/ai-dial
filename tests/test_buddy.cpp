@@ -1,8 +1,8 @@
 // Host check for buddy/scene.h maths against focus.c / the harness-pets demo:
-//   c++ -std=c++17 -DSCENE_NO_LVGL test_buddy.cpp -o /tmp/test_buddy && /tmp/test_buddy
+//   c++ -std=c++17 -DSCENE_NO_LVGL tests/test_buddy.cpp -o /tmp/test_buddy && /tmp/test_buddy
 #include <cassert>
 #include <cstdio>
-#include "buddy/scene.h"
+#include "../buddy/scene.h"
 
 using namespace scene;
 

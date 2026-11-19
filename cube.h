@@ -6,7 +6,7 @@
 //           and releasing mid-swipe keeps it spinning with decaying momentum.
 // Back to MOTION: double-tap near the centre, or CUBE_IDLE_MS with no cube movement.
 //
-// Pure C++ apart from cube_render(). Build with -DCUBE_NO_LVGL for the host test (test_cube.cpp).
+// Pure C++ apart from cube_render(). Build with -DCUBE_NO_LVGL for the host test (tests/test_cube.cpp).
 #pragma once
 #include <algorithm>
 #include <cmath>

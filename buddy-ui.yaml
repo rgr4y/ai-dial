@@ -2,7 +2,7 @@
 # The including config supplies the board side with these ids: display `disp`, touchscreen `touch`, light
 # `display_brightness`, binary sensors `btn_pwr` (PWR key) and `btn_boot` (BOOT key).
 # Pets: buddy/character.h loads a character pack made by scripts/gen_buddy_pets.mjs (runs on every compile).
-# Protocol: docs/DIAL-PROTOCOL.md. Host test: test_buddy.cpp.
+# Protocol: docs/DIAL-PROTOCOL.md. Host test: tests/test_buddy.cpp.
 # ui_root: the 466x466 object the UI builds on. The sim overrides it to sit the glass inside a bigger window.
 
 substitutions:

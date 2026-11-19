@@ -1,7 +1,7 @@
-// Host check for cube.h's state machine: c++ -std=c++17 -DCUBE_NO_LVGL test_cube.cpp -o /tmp/test_cube && /tmp/test_cube
+// Host check for cube.h's state machine: c++ -std=c++17 -DCUBE_NO_LVGL tests/test_cube.cpp -o /tmp/test_cube && /tmp/test_cube
 #include <cassert>
 #include <cstdio>
-#include "cube.h"
+#include "../cube.h"
 
 using namespace dialcube;
 
