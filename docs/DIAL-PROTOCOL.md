@@ -4,10 +4,9 @@ How agent status gets onto the dial, how the dial reports what it shows, and how
 JSON. There are three hops:
 
 ```
-agents ──hook JSON──▶ dial-bridge ──lines──▶ dial (ESPHome API)        ◀── taps from the simulator
-                       (Node, :19876)  ◀──ui / decision── dial            ──▶ ui to the simulator
-                            │ ▲
-                     /ws ───┘ └─── {type:"tap"}            simulator (Vite, :5180)
+agents ──hook JSON──▶ dial-bridge ──lines──▶ dial(s) (ESPHome API: the dial, and the host sim on 127.0.0.1)
+                       (Node, :19876)  ◀──ui / decision── dial(s)
+                       (:19877 assets) ◀──GET pack files── dial (LittleFS sync)
 ```
 
 ## 1. Agents → bridge (HTTP, 127.0.0.1:19876)
@@ -90,11 +89,7 @@ Each target does exactly what the matching touch on the glass does (`buddy/ui.h`
 | `wake` | Wake the screen only. |
 | `screen` | PWR: screen on/off. |
 
-## 5. Bridge ↔ simulator (WebSocket `ws://127.0.0.1:19876/ws`, proxied at `/ws` by Vite)
+## 5. Simulator
 
-- **out:**
-  - `{"type":"dial","ready":true,"host":"claude-buddy.local"}`
-  - `{"type":"ui","ui":{…}}`
-  - `{"type":"line","line":{…}}` (every line sent to the dial)
-- **in:** `{"type":"tap","target":"allow"}`. The bridge calls `buddy_tap`, and the dial's new `ui` comes back,
-  so the page and the glass never disagree.
+There is no separate protocol: `claude-buddy-sim.yaml` runs the dial's own firmware UI on the Mac (ESPHome `host`,
+SDL window) and the bridge talks to it exactly as to the dial, as one more `DIAL_HOST`.
