@@ -60,7 +60,7 @@ static constexpr const char *ROOT = "/littlefs";
 #endif
 
 struct Pack {
-  std::string name, rev;
+  std::string rev;
   std::map<std::string, scene::Scene> scenes;
   scene::Small small;
 };
@@ -197,7 +197,6 @@ inline bool load(const char *name) {
   }
   auto set = [&](JsonVariantConst n) { return n.isNull() ? std::vector<const lv_image_dsc_t *>{} : sets[n | ""]; };
   Pack &pk = pack();
-  pk.name = name;
   pk.rev = doc["rev"] | "";
   for (JsonPairConst kv : doc["scenes"].as<JsonObjectConst>()) {
     JsonObjectConst o = kv.value();
