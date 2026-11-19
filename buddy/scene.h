@@ -58,7 +58,7 @@ inline Pt layer_pos(const Scene &s, const Scene &base, int bias, size_t i, uint8
 // One playing scene: up to MAX_LAYERS layer images, up to 6 discs and (for the alert) a count label.
 // Create once on a parent; play() swaps the scene, tick() moves things only when the step changes.
 struct Player {
-  static constexpr int MAX_LAYERS = 6;
+  static constexpr int MAX_LAYERS = 8;
   lv_obj_t *layer[MAX_LAYERS] = {}, *disc[6] = {}, *count = nullptr;
   const Scene *sc = nullptr, *base = nullptr;
   int bias = 0;

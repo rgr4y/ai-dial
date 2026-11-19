@@ -3,6 +3,8 @@
 //
 //     node scripts/anim/send.mjs [out-dir]        default build/anim/claude
 //
+// gen_buddy_pets.mjs imports { sets, scenes, raw565a8 } from here to ship the scene in the pack; importing writes nothing.
+//
 // Output: <out>/<set>/<k>.bin (one LVGL RGB565A8 RLE frame each) and <out>/manifest.json (the scene table, same shape
 // as bridge/assets/claude/manifest.json). Check it against today's scene with
 //
@@ -124,7 +126,7 @@ function flagTurned(deg) {
 // ---- frame sets ----------------------------------------------------------------------------------------------
 // Each set is a list of { svg, at }; `at` is the frame's scene position. Layers address a frame by set + index.
 const BLANK = { svg: '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>', at: [0, 0] };  // hides a layer
-const sets = {
+export const sets = {
   send_mailbox: [plain('mailbox')],
   send_arm_l: [plain('arm-down'), plain('arm-up')],
   send_legs: [plain('legs')],
@@ -167,12 +169,12 @@ const layers = [
   { set: 'send_letter', loop: letter.map(([k]) => k), at: letter.map(([, x, y]) => [x, y]) },
   { set: 'send_flag', loop: flag, at: flag.map((k) => sets.send_flag[k].at) },
 ];
-const scenes = {
+export const scenes = {
   send: { name: 'claude_send', w: 192, h: 109, dx: 0, dy: 14, steps: STEPS, step_ms: STEP_MS, layers, discs: 0, disc: null, count_at: null },
 };
 
 // ---- write ---------------------------------------------------------------------------------------------------
-function raw565a8({ w, h, rgba }) {
+export function raw565a8({ w, h, rgba }) {
   const n = w * h, raw = Buffer.alloc(n * 3);
   for (let i = 0; i < n; i++) {
     const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
@@ -182,19 +184,21 @@ function raw565a8({ w, h, rgba }) {
   return raw;
 }
 
-rmSync(OUT, { recursive: true, force: true });
-const files = {}, manifestSets = {};
-for (const [name, frames] of Object.entries(sets)) {
-  mkdirSync(join(OUT, name), { recursive: true });
-  manifestSets[name] = frames.map((f, k) => {
-    const px = render(f.svg), file = frameFile(px.w, px.h, raw565a8(px)), path = `${name}/${k}.bin`;
-    f.w = px.w; f.h = px.h;
-    writeFileSync(join(OUT, path), file);
-    files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
-    return path;
-  });
+if (process.argv[1] === fileURLToPath(import.meta.url)) {
+  rmSync(OUT, { recursive: true, force: true });
+  const files = {}, manifestSets = {};
+  for (const [name, frames] of Object.entries(sets)) {
+    mkdirSync(join(OUT, name), { recursive: true });
+    manifestSets[name] = frames.map((f, k) => {
+      const px = render(f.svg), file = frameFile(px.w, px.h, raw565a8(px)), path = `${name}/${k}.bin`;
+      f.w = px.w; f.h = px.h;
+      writeFileSync(join(OUT, path), file);
+      files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
+      return path;
+    });
+  }
+  const rev = createHash('sha256').update(JSON.stringify([files, scenes])).digest('hex').slice(0, 16);
+  writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ name: 'claude', rev, files, sets: manifestSets, scenes }));
+  const bytes = Object.values(files).reduce((a, f) => a + f.size, 0);
+  console.log(`send: ${Object.keys(files).length} frames, ${bytes} bytes packed, rev ${rev} -> ${OUT}`);
 }
-const rev = createHash('sha256').update(JSON.stringify([files, scenes])).digest('hex').slice(0, 16);
-writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ name: 'claude', rev, files, sets: manifestSets, scenes }));
-const bytes = Object.values(files).reduce((a, f) => a + f.size, 0);
-console.log(`send: ${Object.keys(files).length} frames, ${bytes} bytes packed, rev ${rev} -> ${OUT}`);

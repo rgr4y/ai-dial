@@ -18,6 +18,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { raw565a8, scenes as scriptedScenes, sets as scriptedSets } from './anim/send.mjs';
+import { render } from './anim/render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const { PNG } = createRequire(join(ROOT, 'bridge/package.json'))('pngjs');
@@ -93,6 +95,22 @@ function frameFile(w, h, raw) {
 const files = {}, sets = {}, blobs = {};  // blobs: path -> bytes, written only if the rev changed
 let rawBytes = 0, packedBytes = 0;
 
+// Pack one frame (straight-alpha RGBA) as <name>/<k>.bin.
+function addFrame(name, k, w, h, rgba) {
+  const n = w * h, raw = Buffer.alloc(n * 3);
+  for (let i = 0; i < n; i++) {
+    const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
+    raw.writeUInt16LE(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), i * 2);  // little-endian RGB565, as LVGL stores it
+    raw[n * 2 + i] = rgba[i * 4 + 3];
+  }
+  const file = frameFile(w, h, raw), path = `${name}/${k}.bin`;
+  blobs[path] = file;
+  files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
+  sets[name].push(path);
+  rawBytes += raw.length;
+  packedBytes += file.length;
+}
+
 // Write one frame set once; return its name.
 function frames(fr, name) {
   name ??= fr.dir.split('/').at(-1);
@@ -100,18 +118,7 @@ function frames(fr, name) {
   sets[name] = [];
   for (let k = 0; k < fr.n; k++) {
     const { width: w, height: h, data: px } = PNG.sync.read(readFileSync(join(SRC, fr.dir, `${String(k).padStart(2, '0')}.png`)));
-    const n = w * h, raw = Buffer.alloc(n * 3);
-    for (let i = 0; i < n; i++) {
-      const r = px[i * 4], g = px[i * 4 + 1], b = px[i * 4 + 2];
-      raw.writeUInt16LE(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), i * 2);  // little-endian RGB565, as LVGL stores it
-      raw[n * 2 + i] = px[i * 4 + 3];
-    }
-    const file = frameFile(w, h, raw), path = `${name}/${k}.bin`;
-    blobs[path] = file;
-    files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
-    sets[name].push(path);
-    rawBytes += raw.length;
-    packedBytes += file.length;
+    addFrame(name, k, w, h, px);
   }
   return name;
 }
@@ -120,7 +127,7 @@ function frames(fr, name) {
 const scenes = {};
 for (const [role, key] of [['work', 'working'], ['build', 'working_alt'], ['send', 'sending'], ['alert', 'alert'], ['relax', 'relaxing']]) {
   const sc = pet[key];
-  if (!sc) continue;
+  if (!sc || scriptedScenes[role]) continue;  // scripted scenes (scripts/anim/) replace the upstream one
   const steps = sc.steps;  // level 0 only (listening has 5 levels for voice loudness; we use the quiet one)
   scenes[role] = {
     name: sc.name, w: sc.w, h: sc.h, dx: sc.dx, dy: sc.dy, steps, step_ms: sc.step_ms,
@@ -137,6 +144,13 @@ for (const [role, key] of [['work', 'working'], ['build', 'working_alt'], ['send
     count_at: sc.count_at ? sc.count_at.slice(0, steps) : null,
   };
 }
+
+// Scripted scenes: parts rendered from art/claude/ by scripts/anim/ (add the next one to its own module, same exports).
+for (const [name, fr] of Object.entries(scriptedSets)) {
+  sets[name] = [];
+  fr.forEach((f, k) => { const px = render(f.svg); addFrame(name, k, px.w, px.h, px.rgba); });
+}
+Object.assign(scenes, scriptedScenes);
 
 // Small pet above the recap / question card: 1.5x (zoom 6/8 of the 2x art) at <= 3 text lines, 1x (4/8) at 4
 // (focus.c:886-889). 4 state loops of (frame, dy) at step_ms; all four are identical for Claude (pets.c:18).
