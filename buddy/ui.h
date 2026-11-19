@@ -1033,7 +1033,9 @@ inline void update(uint32_t now) {
   if (sending) {
     u.alert.stop();
     const scene::Scene *deny = u.last_deny ? character::find("deny_send") : nullptr;
-    u.scene.play(deny ? deny : character::find("send"), now, 0);  // voice face bias 0 (focus.c:670)
+    // Once, timed from the tap: the last step holds (letter posted) instead of looping back to the letter in hand, and
+    // a permission redraw in between resumes the scene rather than restarting it. Voice face bias 0 (focus.c:670).
+    u.scene.play(deny ? deny : character::find("send"), u.sent_at, 0, nullptr, true);
     arc_text(u.status_arc, "Sent", RELAX_LINE);
   } else if (reading) {
     u.scene.stop();
