@@ -52,7 +52,7 @@ static constexpr uint32_t USAGE_EVERY_MS = 15000, USAGE_SHOW_MS = 3000;  // plan
 static constexpr uint32_t USAGE_WARN = 0xe5e510, USAGE_HOT = 0xcd3131;   // theme question / failed inks
 static constexpr int SPLASH_BIAS = -50;      // splash: pet sits above the wordmark
 static constexpr uint32_t USAGE_ALARM_PCT = 80;  // at or above: the flash also pulses a big red % mid-screen
-static constexpr int RECAP_MAX = 400;           // codepoints; focus.c:793 cut at 90, the card now scrolls instead
+static constexpr int RECAP_MAX = 2000;          // codepoints; focus.c:793 cut at 90, the card now scrolls instead
 // Recap card past 4 lines: hold at the top, scroll to the end, hold, scroll back up quicker, repeat.
 static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_PX_S = 120;
 // Finger-scrolled card: autoscroll resumes this long after the last touch or scroll movement.
