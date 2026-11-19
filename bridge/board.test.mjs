@@ -43,6 +43,20 @@ test('oldest waiting prompt is shown; stale working sessions go idle', () => {
   assert.equal(b.heartbeat(3000 + STALE_MS + 1).running, 0);
 });
 
+test('a session made only of a prompt is dropped when the prompt closes; a real one keeps working', () => {
+  const b = new Board();
+  const id = b.openPrompt({ ...ev('PermissionRequest', { tool_name: 'Bash' }), session_id: 'curl' }, 1000);
+  assert.ok(b.closePrompt(id));
+  assert.equal(b.heartbeat(1000).total, 0);
+
+  b.event(ev('PreToolUse', { tool_name: 'Bash' }), 2000);
+  const id2 = b.openPrompt(ev('PermissionRequest', { tool_name: 'Bash' }), 2000);
+  assert.ok(b.closePrompt(id2));
+  const hb = b.heartbeat(2000);
+  assert.equal(hb.total, 1);
+  assert.equal(hb.running, 1);
+});
+
 test('summarize', () => {
   assert.equal(summarize('Bash', { command: 'git\n status' }), 'git status');
   assert.equal(summarize('Read', { file_path: '/x/y.md' }), 'y.md');

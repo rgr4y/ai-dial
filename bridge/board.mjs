@@ -41,6 +41,7 @@ export class Board {
     }
     if (ev.cwd) s.project = basename(ev.cwd);
     s.at = now;
+    s.promptOnly = false;
     return s;
   }
 
@@ -99,7 +100,9 @@ export class Board {
 
   // A PermissionRequest that the daemon will hold open until the dial answers. Returns the prompt id.
   openPrompt(ev, now) {
+    const fresh = !this.sessions.has(ev.session_id);
     const s = this._session(ev, now);
+    s.promptOnly = fresh;  // no other event from this session yet (a curl test, or the bridge restarted mid-turn)
     const id = `p${++this.seq}-${now.toString(36)}`;
     s.status = 'waiting';
     s.prompt = { id, tool: ev.tool_name || 'tool', hint: `${s.project}: ${summarize(ev.tool_name, ev.tool_input)}`, at: now };
@@ -109,10 +112,13 @@ export class Board {
 
   // The dial answered, or the hook gave up: drop the prompt; the session keeps working.
   closePrompt(id) {
-    for (const s of this.sessions.values()) {
+    for (const [k, s] of this.sessions) {
       if (s.prompt?.id === id) {
         s.prompt = null;
         s.status = 'working';
+        // Nothing but this prompt ever came from it: nothing will say it's done either, so don't leave it working
+        // for STALE_MS. A real session that was mid-turn comes back with its next event.
+        if (s.promptOnly) this.sessions.delete(k);
         return true;
       }
     }
