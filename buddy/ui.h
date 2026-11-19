@@ -495,7 +495,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
   lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
   // Drag target: it must be the pressed object for the indev to scroll it. EVENT_BUBBLE passes CLICKED up to u.card.
-  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_CLICKABLE);  // one flag per call: C++ won't take an OR'd int as lv_obj_flag_t
+  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_ELASTIC);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
   lv_obj_set_scroll_dir(u.card_text, LV_DIR_VER);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_PRESSED, nullptr);
