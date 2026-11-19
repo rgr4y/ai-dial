@@ -4,6 +4,15 @@
 - **UI changes:** show them in the sim (`make sim`) and get approval before flashing the dial.
 - **Builds:** compile, flash and run the sim only in a visible Terminal (`make sim`, `make flash`), never hidden.
 
+## ESPHome YAML: extend, don't fork
+
+`claude-buddy.yaml` pulls in packages (`../esphome/chicken-base.yaml`, `dial-hardware.yaml`, `buddy-ui.yaml`). Never edit a shared package to change one device; override it from the including file. Merge rules (ESPHome `config_helpers.py` merge_config, `config.py` resolve_extend_remove):
+- Maps merge key by key, recursively. A scalar set later wins.
+- Lists concatenate, so `ota: - platform: esphome` with only `on_begin:` etc. adds triggers to the base OTA. ESPHome folds esphome-OTA entries on the same port into one, keeping the password.
+- `- id: !extend <id>` merges into the list item with that id (e.g. `touchscreen: - id: !extend touch` in buddy-ui.yaml).
+- `- id: !remove <id>` drops that list item.
+- `<key>: !remove` drops a key at any depth, a whole top-level component included (`web_server: !remove`).
+
 ## Task tracking: beads (`br`)
 
 Work items are beads in `.beads/`, kept locally and gitignored. `bv` gives a viewer and graph.
