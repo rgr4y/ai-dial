@@ -41,6 +41,7 @@ claude_buddy:
 
 # ---- Dial bridge (bridge/): every agent's status over Wi-Fi, as Hardware Buddy JSON lines ----
 api:
+  reboot_timeout: 0s
   actions:
     - action: buddy_line
       variables:
