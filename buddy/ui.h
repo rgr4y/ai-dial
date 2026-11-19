@@ -58,6 +58,7 @@ static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
 enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE };
+static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage"};
 
 struct Ui {
   Fonts f{};
@@ -314,10 +315,9 @@ inline void publish_state() {
   Ui &u = ui();
   auto vis = [](lv_obj_t *o) { return o && !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN); };
   auto hex = [](uint32_t c) { char b[8]; snprintf(b, sizeof(b), "#%06x", (unsigned) c); return std::string(b); };
-  static const char *const VIEWS[] = {"brand", "face", "permission", "entries", "usage"};
   JsonDocument d;
   d["v"] = 1;
-  d["view"] = VIEWS[(int) u.view];
+  d["view"] = VIEW_NAMES[(int) u.view];
   d["asleep"] = u.asleep;
   d["name"] = u.arc_txt[0];
   JsonObject st = d["status"].to<JsonObject>();
@@ -727,8 +727,7 @@ inline void update(uint32_t now) {
   if (v == View::FACE && u.view != View::FACE) pick_hint();
   bool entered = v != u.view;
   if (entered) {
-    static const char *const NAMES[] = {"brand", "face", "permission", "entries", "usage"};
-    ESP_LOGI("buddyui", "view %s (running %u, waiting %u)", NAMES[(int) v], (unsigned) s.running, (unsigned) s.waiting);
+    ESP_LOGI("buddyui", "view %s (running %u, waiting %u)", VIEW_NAMES[(int) v], (unsigned) s.running, (unsigned) s.waiting);
   }
   if (entered && u.view == View::BRAND) burst();  // the bridge just connected
   u.view = v;
