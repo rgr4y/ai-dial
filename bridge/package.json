@@ -9,7 +9,7 @@
     "start": "node dial-bridge.mjs",
     "test": "node --test",
     "bridge": "node dial-bridge.mjs",
-    "sim": "cd .. && esphome run claude-buddy-sim.yaml"
+    "sim": "make -C .. sim"
   },
   "dependencies": {
     "@2colors/esphome-native-api": "1.3.7"
