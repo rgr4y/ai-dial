@@ -22,6 +22,7 @@ import { frameFile, raw565a8 } from './anim/frames.mjs';
 import { scenes as sendScenes, sets as sendSets } from './anim/send.mjs';
 import { scenes as denyScenes, sets as denySets } from './anim/deny_send.mjs';
 import { scenes as workScenes, sets as workSets } from './anim/work.mjs';
+import { scenes as grokScenes, sets as grokSets } from './anim/grok.mjs';
 import { render } from './anim/render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -32,7 +33,8 @@ const OUT = process.argv[3] ?? join(ROOT, 'bridge/assets/claude');
 const js = readFileSync(join(SRC, 'data.js'), 'utf8');
 const data = JSON.parse(js.slice(js.indexOf('{'), js.lastIndexOf('}') + 1));
 const pet = data.pets.find((p) => p.engine === 'claude');
-const scriptedScenes = { ...sendScenes, ...denyScenes, ...workScenes }, scriptedSets = { ...sendSets, ...denySets, ...workSets };
+const scriptedScenes = { ...sendScenes, ...denyScenes, ...workScenes, ...grokScenes };
+const scriptedSets = { ...sendSets, ...denySets, ...workSets, ...grokSets };
 
 
 const files = {}, sets = {}, blobs = {};  // blobs: path -> bytes, written only if the rev changed

@@ -1,0 +1,4 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="144" height="144" viewBox="0 0 144 144">
+  <path id="body" d="M72 12a60 60 0 1 1 -.01 0Z" fill="#fff" fill-rule="evenodd"/>
+  <g id="eyes" fill="#111"><rect x="47.41" y="60.23" width="15.33" height="33.61" rx="7.67"/><rect x="81.25" y="60.23" width="15.33" height="33.61" rx="7.67"/></g>
+</svg>
