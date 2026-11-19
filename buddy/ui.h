@@ -14,6 +14,7 @@
 #include <utility>
 
 #include "character.h"
+#include "power.h"
 #include "scene.h"
 #include "esphome/core/defines.h"
 #ifdef USE_WIFI
@@ -60,7 +61,7 @@ struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE };
 static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage"};
 
-struct Ui {
+struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: power.h
   Fonts f{};
   lv_obj_t *root = nullptr;
   lv_obj_t *name_arc = nullptr, *status_arc = nullptr;
@@ -91,8 +92,6 @@ struct Ui {
   uint32_t recap_cleared = 0;         // turn text at or before this is not shown
   uint32_t sent_at = 0;               // claude_send plays until sent_at + SEND_MS
   const char *hint = "What's next?";
-  uint32_t last_activity = 0;
-  bool asleep = false;
   lv_obj_t *shield = nullptr;          // while dark: eats touches so a wake tap can't hit [ allow ]
   bool small_was = false;
   std::function<int()> battery;       // YAML: battery % when running on it, -1 when on USB or no cell
@@ -103,7 +102,6 @@ struct Ui {
   std::string last_state;
   bool shimmer = false;   // lower-arc status shimmer on (the working line)
   uint8_t shimmer_phase = 0;
-  bool wake = false, sleep = false;   // one-shot requests for the YAML side (light fade)
   uint32_t small_t0 = 0;
   const std::vector<const lv_image_dsc_t *> *small_set = nullptr;
 };
@@ -236,21 +234,15 @@ inline void arc_text(lv_obj_t *a, const char *text, uint32_t color, bool shimmer
   lv_arclabel_set_text(a, text);
 }
 
+// State changes in power.h; the shield follows them here.
 inline void set_asleep(bool z) {
-  Ui &u = ui();
-  if (u.asleep == z) return;
-  u.asleep = z;
-  (z ? u.sleep : u.wake) = true;
-  show(u.shield, z);
+  if (ui().set_asleep(z)) show(ui().shield, z);
 }
 inline void activity(uint32_t now) {
-  ui().last_activity = now;
-  set_asleep(false);
+  if (ui().activity(now)) show(ui().shield, false);
 }
-// PWR tap (ptt.c:20-22): screen off/on, through the same state the idle timeout uses.
 inline void toggle_screen(uint32_t now) {
-  if (ui().asleep) activity(now);
-  else set_asleep(true);
+  if (ui().toggle(now)) show(ui().shield, ui().asleep);
 }
 
 void update(uint32_t now);
@@ -967,7 +959,7 @@ inline void tick(uint32_t now) {
 }
 
 // YAML hooks, polled from the 50 ms interval: take_wake() -> fade the panel in, take_sleep() -> fade it out.
-inline bool take_wake() { return std::exchange(ui().wake, false); }
-inline bool take_sleep() { return std::exchange(ui().sleep, false); }
+inline bool take_wake() { return ui().take_wake(); }
+inline bool take_sleep() { return ui().take_sleep(); }
 
 }  // namespace buddyui
