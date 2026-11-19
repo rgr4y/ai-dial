@@ -55,6 +55,8 @@ static constexpr uint32_t USAGE_ALARM_PCT = 80;  // at or above: the flash also 
 static constexpr int RECAP_MAX = 400;           // codepoints; focus.c:793 cut at 90, the card now scrolls instead
 // Recap card past 4 lines: hold at the top, scroll to the end, hold, scroll back up quicker, repeat.
 static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_PX_S = 120;
+// Finger-scrolled card: autoscroll resumes this long after the last touch or scroll movement.
+static constexpr uint32_t CARD_MANUAL_MS = 5000;
 
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
@@ -67,6 +69,8 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   lv_obj_t *name_arc = nullptr, *status_arc = nullptr;
   scene::Player scene, alert;
   int card_lines = 0;  // recap card height in lines (1-4), set when its text changes
+  bool card_overflow = false, card_manual = false;  // text past 4 lines; finger has taken over the scroll
+  uint32_t card_manual_at = 0;                      // last touch / scroll movement while manual
   lv_obj_t *small = nullptr, *card = nullptr, *card_text = nullptr, *bell = nullptr, *bell_text = nullptr;
   lv_obj_t *word = nullptr, *sub = nullptr;                                  // brand (bridge offline)
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
@@ -382,6 +386,22 @@ inline void on_root(lv_event_t *e) {
   update(now);
 }
 inline void on_card(lv_event_t *) { tap("card"); }
+inline void card_scroll_y(void *o, int32_t y);
+// Finger on the overflowing reply text: stop the autoscroll, restart the 5 s count on every touch/move.
+// LVGL sends no CLICKED / LONG_PRESSED after a scroll starts (lv_indev.c:1526, :1426), so a drag can't tap/hold.
+inline void on_card_text(lv_event_t *e) {
+  Ui &u = ui();
+  uint32_t now = lv_tick_get();
+  if (lv_event_get_code(e) == LV_EVENT_PRESSED) {
+    if (!u.card_overflow) return;
+    lv_anim_delete(u.card_text, card_scroll_y);
+    u.card_manual = true;
+  } else if (!u.card_manual) {
+    return;  // SCROLL from our own autoscroll / resume anim
+  }
+  u.card_manual_at = now;
+  activity(now);
+}
 inline void on_reopen(lv_event_t *) { tap("bell"); }  // the bell pill or alert bubble: open the put-off prompt again
 inline void on_decide(lv_event_t *e) { tap(lv_event_get_target_obj(e) == ui().btn_allow ? "allow" : "deny"); }
 
@@ -474,6 +494,13 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
   lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
   lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
+  // Drag target: it must be the pressed object for the indev to scroll it. EVENT_BUBBLE passes CLICKED up to u.card.
+  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_CLICKABLE | LV_OBJ_FLAG_SCROLLABLE | LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_ELASTIC);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
+  lv_obj_set_scroll_dir(u.card_text, LV_DIR_VER);
+  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_PRESSED, nullptr);
+  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_SCROLL, nullptr);
+  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_RELEASED, nullptr);
   lv_obj_center(u.card_text);
 
   // Bell pill (spec §2.6): 0x006fff, 32 px tall, fully rounded, centred at y 400.
@@ -623,12 +650,48 @@ inline void place_small(int card_top, bool big, uint32_t now) {
 
 inline void card_scroll_y(void *o, int32_t y) { lv_obj_scroll_to_y((lv_obj_t *) o, y, LV_ANIM_OFF); }
 
+// Autoscroll cycle: hold at the top, scroll down dist px, hold, back up quicker, repeat.
+inline void start_card_anim(int dist) {
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, ui().card_text);
+  lv_anim_set_exec_cb(&a, card_scroll_y);
+  lv_anim_set_values(&a, 0, dist);
+  lv_anim_set_delay(&a, CARD_HOLD_MS);
+  lv_anim_set_duration(&a, dist * 1000 / CARD_SCROLL_PX_S);
+  lv_anim_set_reverse_delay(&a, CARD_HOLD_MS);
+  lv_anim_set_reverse_duration(&a, dist * 1000 / CARD_BACK_PX_S);
+  lv_anim_set_repeat_delay(&a, CARD_HOLD_MS);
+  lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+  lv_anim_start(&a);
+}
+// 5 s after the last touch: back to the top at CARD_BACK_PX_S, then the normal cycle.
+inline void resume_card_anim() {
+  Ui &u = ui();
+  u.card_manual = false;
+  int32_t y = lv_obj_get_scroll_top(u.card_text);
+  int dist = y + lv_obj_get_scroll_bottom(u.card_text);  // content overflow, constant while scrolling
+  if (y <= 0) return start_card_anim(dist);
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, u.card_text);
+  lv_anim_set_exec_cb(&a, card_scroll_y);
+  lv_anim_set_values(&a, y, 0);
+  lv_anim_set_duration(&a, y * 1000 / CARD_BACK_PX_S);
+  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+  lv_anim_set_user_data(&a, (void *) (intptr_t) dist);
+  lv_anim_set_completed_cb(&a, [](lv_anim_t *an) { start_card_anim((int) (intptr_t) lv_anim_get_user_data(an)); });
+  lv_anim_start(&a);
+}
+
 inline void show_card(const std::string &text, uint32_t now) {
   Ui &u = ui();
   show(u.card, true);
   if (strcmp(lv_label_get_text(u.card_text), text.c_str()) != 0 || u.card_lines == 0) {
     // New text: measure it at full height, then pin to 4 lines and scroll the rest through.
     lv_anim_delete(u.card_text, card_scroll_y);
+    u.card_manual = false;
     lv_obj_scroll_to_y(u.card_text, 0, LV_ANIM_OFF);
     lv_obj_set_height(u.card_text, LV_SIZE_CONTENT);
     lv_label_set_text(u.card_text, text.c_str());
@@ -636,22 +699,11 @@ inline void show_card(const std::string &text, uint32_t now) {
     int full = lv_obj_get_height(u.card_text);
     int lines = full / 43 + 1;
     u.card_lines = std::min(lines, 4);
+    u.card_overflow = lines > 4;
     if (lines > 4) {
       lv_obj_set_height(u.card_text, 4 * 43);
       int dist = full - 4 * 43;
-      lv_anim_t a;
-      lv_anim_init(&a);
-      lv_anim_set_var(&a, u.card_text);
-      lv_anim_set_exec_cb(&a, card_scroll_y);
-      lv_anim_set_values(&a, 0, dist);
-      lv_anim_set_delay(&a, CARD_HOLD_MS);
-      lv_anim_set_duration(&a, dist * 1000 / CARD_SCROLL_PX_S);
-      lv_anim_set_reverse_delay(&a, CARD_HOLD_MS);
-      lv_anim_set_reverse_duration(&a, dist * 1000 / CARD_BACK_PX_S);
-      lv_anim_set_repeat_delay(&a, CARD_HOLD_MS);
-      lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-      lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
-      lv_anim_start(&a);
+      start_card_anim(dist);
     }
   }
   int h = u.card_lines * 43 + 2 * 21;
@@ -1010,6 +1062,9 @@ inline void tick(uint32_t now) {
     lv_obj_update_layout(u.card);
     place_small(lv_obj_get_y(u.card), u.small_set == &character::pack().small.z6, now);
   }
+  if (u.card_manual && !u.asleep && !lv_obj_has_flag(u.card, LV_OBJ_FLAG_HIDDEN) && now - u.card_manual_at >= CARD_MANUAL_MS &&
+      lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED)
+    resume_card_anim();
   static uint8_t in_usage = 0;  // start/end the usage flash on time, not on the next 1 s update
   uint8_t w = (uint8_t) std::min<uint32_t>(now % USAGE_EVERY_MS / USAGE_SHOW_MS, 2);
   if (w != in_usage) {
