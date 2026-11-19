@@ -221,19 +221,16 @@ setInterval(refreshUsage, 60000);
 const ASSETS_PORT = Number(process.env.DIAL_ASSETS_PORT || 19877);
 const ASSETS_DIR = join(import.meta.dirname, 'assets');
 const CHARACTER = 'claude';
-let manifestCache = { mtime: 0, rev: null };
 function assetsLine(dial) {
   // The address the dial sees us at: our end of the API connection.
   const local = dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
   if (!local) return null;
   try {
-    const st = statSync(join(ASSETS_DIR, CHARACTER, 'manifest.json'));
-    if (st.mtimeMs !== manifestCache.mtime)
-      manifestCache = { mtime: st.mtimeMs, rev: JSON.parse(readFileSync(join(ASSETS_DIR, CHARACTER, 'manifest.json'), 'utf8')).rev };
+    const { rev } = JSON.parse(readFileSync(join(ASSETS_DIR, CHARACTER, 'manifest.json'), 'utf8'));
+    return { url: `http://${local}:${ASSETS_PORT}/${CHARACTER}/`, rev };
   } catch {
     return null;
   }
-  return { url: `http://${local}:${ASSETS_PORT}/${CHARACTER}/`, rev: manifestCache.rev };
 }
 createServer((req, res) => {
   const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
