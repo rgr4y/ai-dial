@@ -17,20 +17,23 @@
 // Several dials can be driven at once (the dial and the desktop sim, claude-buddy-sim.yaml): DIAL_HOST is a comma list;
 // all get the same heartbeats, the first to answer a prompt wins.
 // Config (env): DIAL_HOST (10.0.0.11, reserved on the router; e.g. "10.0.0.11,127.0.0.1"), DIAL_KEY (API encryption key; default: api_key from
-// DIAL_SECRETS, ~/workspace/esphome/secrets.yaml), DIAL_BRIDGE_PORT (19876), DIAL_PROMPT_TIMEOUT_S (280).
+// DIAL_SECRETS, ~/workspace/esphome/secrets.yaml), DIAL_BRIDGE_PORT (19876), DIAL_PROMPT_TIMEOUT_S (280),
+// GROK_BOT_STORE (Grok Bot's store dir, watched read-only; skipped if absent).
 
 import { execFile } from 'node:child_process';
-import { createReadStream, readFileSync, statSync } from 'node:fs';
+import { createReadStream, existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join, normalize, sep } from 'node:path';
 import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
+import { conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
 
 const { Client, ServiceArgType } = esphome;
 const HOSTS = (process.env.DIAL_HOST || '10.0.0.11').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
 const PORT = Number(process.env.DIAL_BRIDGE_PORT || 19876);
 const PROMPT_TIMEOUT_MS = Number(process.env.DIAL_PROMPT_TIMEOUT_S || 280) * 1000;
+const GROK_STORE = process.env.GROK_BOT_STORE || `${homedir()}/Library/Application Support/Grok Bot/sand-client-persistence`;
 const KEEPALIVE_MS = 10000; // the dial treats 30 s of silence as gone
 
 function apiKey() {
@@ -316,3 +319,42 @@ const server = createServer(async (req, res) => {
 server.listen(PORT, '127.0.0.1', () => log(`listening on 127.0.0.1:${PORT}, dials ${HOSTS.join(', ')}`));
 
 dials.forEach(connectDial);
+
+// ---- Grok Bot store (read-only) ----
+// The app rewrites whole blob files; fs.watch fires several times per write, so debounce per file.
+function watchGrokBot(dir) {
+  if (!existsSync(dir)) return log(`grok bot store not found, skipping: ${dir}`);
+  const names = new Map();   // conversation uuid -> bot name, merged over every account's roster
+  const rosters = new Map(); // file -> Map
+  const seqs = new Map();    // transcript file -> last seq seen
+  const timers = new Map();
+  const loadRoster = (f) => {
+    rosters.set(f, readRoster(join(dir, f)));
+    names.clear();
+    for (const r of rosters.values()) for (const [k, v] of r) names.set(k, v);
+  };
+  const kind = (f) => {
+    const key = decodeKey(f);
+    return key.endsWith('.roster.last-roster') ? 'roster' : conversationId(key) ? 'transcript' : '';
+  };
+  const files = readdirSync(dir);
+  for (const f of files) if (kind(f) === 'roster') loadRoster(f);
+  for (const f of files) if (kind(f) === 'transcript') seqs.set(f, eventsSince(join(dir, f), -1).lastSeq); // baseline, nothing emitted
+  const handle = (f) => {
+    const k = kind(f);
+    if (k === 'roster') return loadRoster(f);
+    if (k !== 'transcript') return;
+    const { events, lastSeq } = eventsSince(join(dir, f), seqs.get(f) ?? -1, names);
+    seqs.set(f, lastSeq);
+    if (!events.length) return;
+    log(`grok ${names.get(conversationId(decodeKey(f))) || 'Grok Bot'}: ${events.length} events`);
+    events.forEach(onEvent);
+  };
+  watch(dir, (_type, f) => {
+    if (!f) return;
+    clearTimeout(timers.get(f));
+    timers.set(f, setTimeout(() => { timers.delete(f); handle(f); }, 300));
+  }).on('error', (e) => log('grok watch error:', e.message));
+  log(`grok bot store watched: ${dir} (${seqs.size} conversations)`);
+}
+watchGrokBot(GROK_STORE);

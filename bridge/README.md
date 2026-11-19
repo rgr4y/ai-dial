@@ -37,6 +37,14 @@ component) for the Mac with ESPHome's `host` platform, drawing into an SDL windo
 - **Input:** the mouse is touch. PWR and BOOT: click the keys on the case edge (placed as on the real dial), or press `p` / `b`. The window shows the 466 px glass inside the case at true scale.
 - **Pets:** read straight from `assets/` (no LittleFS, no sync); restart the sim after regenerating.
 
+## Grok Bot
+
+The bridge also watches Grok Bot's local store (`~/Library/Application Support/Grok Bot/sand-client-persistence/`,
+read-only) and feeds it through `grokbot.mjs` as `grok-bot:` sessions. Override the dir with `GROK_BOT_STORE`; if it
+doesn't exist the bridge logs once and carries on. History at startup isn't replayed. On the dial: your prompt ->
+working, the bot's reply -> reply card, a local command -> an entry (`<bot>: run-command <cmd>`). No permission
+answering yet. The log gets one line per batch (`grok <bot>: <n> events`), never message content.
+
 ## Usage
 
 Plan usage for every provider comes from CodexBar's HTTP server (Settings → Advanced, port 6969 here; set
