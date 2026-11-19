@@ -1,5 +1,7 @@
 # TE sync for the CO5300 (mipi_spi fork)
 
+> The fork was removed on 2026-11-19 and is in git history at commit c7e03b5.
+
 > **NOT IN USE (2026-11-18).** `esp32-dial.yaml` is back on core `mipi_spi`, with no
 > `external_components` local entry, no `te_pin`, and LVGL `buffer_size: 25%`. No TE variant beat the
 > no-TE baseline (about 21fps, slight tearing). See the results table below.
