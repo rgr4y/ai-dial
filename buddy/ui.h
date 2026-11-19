@@ -87,6 +87,8 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   bool battery_open = false;
   uint32_t battery_at = 0;
   lv_obj_t *battery_page = nullptr, *battery_ring = nullptr, *battery_num = nullptr;  // battery page (BOOT after usage)
+  lv_obj_t *bat_arc = nullptr;  // face-side battery %, left edge
+  std::string bat_txt;
   std::string usage_key;  // usages_key the usage screen was built from
   std::string deferred_id;            // prompt the user put off with "later": face + alert until it changes
   bool was_running = false;
@@ -579,6 +581,11 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.name_arc = mk_arc(root, u.f.f26m, true);
   u.status_arc = mk_arc(root, u.f.f26m, false);
   lv_arclabel_set_recolor(u.status_arc, true);  // per-letter colour for the shimmer
+  // Left edge, 150..210 deg clockwise: reads bottom to top, centred on 9 o'clock.
+  u.bat_arc = mk_arc(root, u.f.f26m, true);
+  lv_arclabel_set_angle_start(u.bat_arc, 150);
+  lv_arclabel_set_angle_size(u.bat_arc, 60);
+  lv_obj_add_flag(u.bat_arc, LV_OBJ_FLAG_HIDDEN);
   // Shield last = topmost. Hidden while awake; while dark it takes the touch and only wakes the screen
   // (touch_habitat.c:133-138 swallows the wake contact the same way).
   u.shield = lv_obj_create(root);
@@ -757,6 +764,22 @@ inline void update(uint32_t now) {
   if (entered && u.view == View::BRAND) burst();  // the bridge just connected
   u.view = v;
   if (v != View::BRAND) u.was_live = true;
+  {  // face-side battery %: face only, always on battery, 60 s after plug-in / wake on USB
+    bool usb = u.on_usb && u.on_usb();
+    u.power_source(usb, now);
+    int bat = u.battery ? u.battery() : -1;
+    bool side = v == View::FACE && bat >= 0 && u.show_battery_side(usb, now);
+    show(u.bat_arc, side);
+    if (side) {
+      char t[8];
+      snprintf(t, sizeof(t), "%d%%", bat);
+      if (u.bat_txt != t) {
+        u.bat_txt = t;
+        lv_arclabel_set_text(u.bat_arc, t);
+      }
+      lv_obj_set_style_text_color(u.bat_arc, lv_color_hex(power::battery_ink(bat)), 0);
+    }
+  }
 
   // Everything off, then switch on what this view uses.
   // Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
@@ -913,13 +936,6 @@ inline void update(uint32_t now) {
       vis.on(u.alarm);
     }
   }
-  // On battery: the 3 s right after the usage flash show the charge (hidden on USB, so docked stays clean).
-  int bat = u.battery ? u.battery() : -1;
-  if (bat >= 0 && !(u.on_usb && u.on_usb()) && !sending && now % USAGE_EVERY_MS >= USAGE_SHOW_MS && now % USAGE_EVERY_MS < 2 * USAGE_SHOW_MS) {
-    char t[24];
-    snprintf(t, sizeof(t), "Battery %d%%", bat);
-    arc_text(u.status_arc, t, bat <= 15 ? USAGE_HOT : bat <= 30 ? USAGE_WARN : RELAX_LINE);
-  }
   if (waiting && !running) {
     char n[16];
     snprintf(n, sizeof(n), "%u waiting", (unsigned) s.waiting);  // ponytail: no bell glyph (Harness uses FontAwesome)
@@ -994,7 +1010,7 @@ inline void tick(uint32_t now) {
     lv_obj_update_layout(u.card);
     place_small(lv_obj_get_y(u.card), u.small_set == &character::pack().small.z6, now);
   }
-  static uint8_t in_usage = 0;  // start/end the usage and battery flashes on time, not on the next 1 s update
+  static uint8_t in_usage = 0;  // start/end the usage flash on time, not on the next 1 s update
   uint8_t w = (uint8_t) std::min<uint32_t>(now % USAGE_EVERY_MS / USAGE_SHOW_MS, 2);
   if (w != in_usage) {
     in_usage = w;

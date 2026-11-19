@@ -42,6 +42,27 @@ int main() {
   t = tick(a);
   assert(!t.wake && !t.sleep);
 
+  // Face-side battery %: always on battery; on USB 60 s after plug-in, then hidden, then 60 s after a wake.
+  power::Screen b;
+  b.activity(1000);
+  b.power_source(false, 100000);
+  assert(b.show_battery_side(false, 100000) && b.show_battery_side(false, 900000));
+  b.power_source(true, 200000);  // plug in
+  assert(b.show_battery_side(true, 200000) && b.show_battery_side(true, 259999));
+  b.power_source(true, 260000);
+  assert(!b.show_battery_side(true, 260000));
+  b.set_asleep(true);
+  assert(b.activity(300000));  // wake
+  b.power_source(true, 300050);
+  assert(b.show_battery_side(true, 359999) && !b.show_battery_side(true, 360000));
+  b.power_source(false, 400000);  // unplug, replug restarts the window
+  b.power_source(true, 500000);
+  assert(b.show_battery_side(true, 559999) && !b.show_battery_side(true, 560000));
+  // Boot already on USB: plug-in at the first tick.
+  power::Screen c;
+  c.power_source(true, 5000);
+  assert(c.show_battery_side(true, 64999) && !c.show_battery_side(true, 65000));
+
   // Sim: touches on the case keys hit them, the glass and the gap between them do not.
   using namespace sim_keys;
   for (Key k : {PWR, BOOT}) {
