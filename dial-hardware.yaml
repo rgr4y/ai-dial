@@ -14,6 +14,7 @@ esp32:
   framework:
     type: esp-idf
     advanced:
+      flash_chip: gd
       enable_idf_experimental_features: true  # OTA above 16MB
     sdkconfig_options:
       CONFIG_COMPILER_OPTIMIZATION_PERF: "y"
