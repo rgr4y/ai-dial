@@ -14,4 +14,5 @@ Work items are beads in `.beads/`, kept locally and gitignored. `bv` gives a vie
 - **Finish:** run the bead's Verify steps, then `br close <id> -r "<what changed; what was verified; what Rob still has to check>"`.
 - **New work you find:** create a bead (`br create ... -t task -p <0-4>`) instead of widening the current one.
 - **Order:** dependencies serialize beads that touch the same files. Never work a blocked bead.
-- **Rob's decision:** turning audits or reviews into beads (`/br-0`) is Rob's call. Agents don't run it themselves.
+- **Rob's decision:** turning audits or reviews into beads (`/br-0`) and running the queue (`/br-1`) are Rob's call. Agents don't run them themselves.
+- **Under `/br-1`:** the worker brief overrides **Finish** above. Workers don't commit or close. The orchestrator verifies, commits (`<summary> [<bead-id>]`), and closes.
