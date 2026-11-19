@@ -103,6 +103,7 @@ touchscreen:
     id: touch
     display: disp
     i2c_id: bus_a
+    update_interval: never
     interrupt_pin: GPIO11
     reset_pin: GPIO2
     transform:
