@@ -38,7 +38,9 @@ static constexpr uint32_t USAGE_EVERY_MS = 15000, USAGE_SHOW_MS = 3000;  // plan
 static constexpr uint32_t USAGE_WARN = 0xe5e510, USAGE_HOT = 0xcd3131;   // theme question / failed inks
 static constexpr int SPLASH_BIAS = -50;      // splash: pet sits above the wordmark
 static constexpr uint32_t USAGE_ALARM_PCT = 80;  // at or above: the flash also pulses a big red % mid-screen
-static constexpr int RECAP_MAX = 90;            // codepoints (focus.c:793)
+static constexpr int RECAP_MAX = 400;           // codepoints; focus.c:793 cut at 90, the card now scrolls instead
+// Recap card past 4 lines: hold at the top, scroll to the end, hold, scroll back up quicker, repeat.
+static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_PX_S = 120;
 
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
@@ -49,6 +51,7 @@ struct Ui {
   lv_obj_t *root = nullptr;
   lv_obj_t *name_arc = nullptr, *status_arc = nullptr;
   scene::Player scene, alert;
+  int card_lines = 0;  // recap card height in lines (1-4), set when its text changes
   lv_obj_t *small = nullptr, *card = nullptr, *card_text = nullptr, *bell = nullptr, *bell_text = nullptr;
   lv_obj_t *word = nullptr, *sub = nullptr;                                  // brand (bridge offline)
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
@@ -471,7 +474,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.card_text = mk_label(u.card, u.f.f30, RECAP);
   lv_obj_set_width(u.card_text, 364);
   lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
-  lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);
+  lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
+  lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
   lv_obj_center(u.card_text);
 
   // Bell pill (spec §2.6): 0x006fff, 32 px tall, fully rounded, centred at y 400.
@@ -593,26 +597,43 @@ inline void place_small(int card_top, bool big, uint32_t now) {
                  66 + (card_top - 66 - (int) img->header.h) / 2 + st[1] * z / 4);
 }
 
+inline void card_scroll_y(void *o, int32_t y) { lv_obj_scroll_to_y((lv_obj_t *) o, y, LV_ANIM_OFF); }
+
 inline void show_card(const std::string &text, uint32_t now) {
   Ui &u = ui();
-  lv_obj_set_height(u.card_text, LV_SIZE_CONTENT);  // un-pin a previous 4-line cut before measuring
-  lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);
-  set_text(u.card_text, text.c_str());
   show(u.card, true);
-  lv_obj_update_layout(u.card);
-  int lines = lv_obj_get_height(u.card_text) / 43 + 1;
-  if (lines > 4) {
-    lv_obj_set_height(u.card_text, 4 * 43);
-    lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_DOTS);
-    lines = 4;
-  } else {
+  if (strcmp(lv_label_get_text(u.card_text), text.c_str()) != 0 || u.card_lines == 0) {
+    // New text: measure it at full height, then pin to 4 lines and scroll the rest through.
+    lv_anim_delete(u.card_text, card_scroll_y);
+    lv_obj_scroll_to_y(u.card_text, 0, LV_ANIM_OFF);
     lv_obj_set_height(u.card_text, LV_SIZE_CONTENT);
-    lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);
+    lv_label_set_text(u.card_text, text.c_str());
+    lv_obj_update_layout(u.card);
+    int full = lv_obj_get_height(u.card_text);
+    int lines = full / 43 + 1;
+    u.card_lines = std::min(lines, 4);
+    if (lines > 4) {
+      lv_obj_set_height(u.card_text, 4 * 43);
+      int dist = full - 4 * 43;
+      lv_anim_t a;
+      lv_anim_init(&a);
+      lv_anim_set_var(&a, u.card_text);
+      lv_anim_set_exec_cb(&a, card_scroll_y);
+      lv_anim_set_values(&a, 0, dist);
+      lv_anim_set_delay(&a, CARD_HOLD_MS);
+      lv_anim_set_duration(&a, dist * 1000 / CARD_SCROLL_PX_S);
+      lv_anim_set_reverse_delay(&a, CARD_HOLD_MS);
+      lv_anim_set_reverse_duration(&a, dist * 1000 / CARD_BACK_PX_S);
+      lv_anim_set_repeat_delay(&a, CARD_HOLD_MS);
+      lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
+      lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+      lv_anim_start(&a);
+    }
   }
-  int h = lines * 43 + 2 * 21;
+  int h = u.card_lines * 43 + 2 * 21;
   int top = 176 + (200 - h) / 2;  // centred in y 176-376 (focus.c:49-56)
   lv_obj_set_y(u.card, top);
-  place_small(top, lines <= 3, now);
+  place_small(top, u.card_lines <= 3, now);
 }
 
 // Usage screen layout: per provider its name, then a row per rate window: label,
