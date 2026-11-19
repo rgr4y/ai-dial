@@ -41,6 +41,7 @@ inline size_t heap_caps_get_free_size(int) { return 0; }
 #endif
 
 #include "esphome/components/json/json_util.h"
+#include "esphome/core/application.h"
 #include "esphome/core/hal.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
@@ -187,6 +188,7 @@ inline bool load(const char *name) {
   for (JsonPairConst kv : doc["sets"].as<JsonObjectConst>()) {
     auto &v = sets[kv.key().c_str()];
     for (JsonVariantConst p : kv.value().as<JsonArrayConst>()) {
+      esphome::App.feed_wdt();  // the whole pack decodes in one go at boot: longer than the 5 s task watchdog
       const lv_image_dsc_t *d = load_frame(dir + (p | ""));
       if (!d) {
         ESP_LOGE(TAG, "Bad frame %s: pack ignored", p | "");
