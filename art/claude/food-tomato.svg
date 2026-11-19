@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="170 48 20 20">
+  <!-- Tomato, work-scene coords (frame 0), centre (180, 58). -->
+  <circle cx="180" cy="58" r="7.5" fill="#c7332a"/>
+  <circle cx="179.4" cy="57.4" r="6.8" fill="#e43a30"/>
+  <circle cx="177.6" cy="59.4" r="1.8" fill="#ff9684"/>
+  <path d="M173.2 55L170.8 58L173.8 60.2Z" fill="#4c9c40"/>
+</svg>

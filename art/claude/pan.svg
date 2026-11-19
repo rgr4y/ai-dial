@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="80" height="17" viewBox="114 62 80 17">
+  <!-- Frying pan with its handle, work-scene coords (frame 0). Grip (handle's left end) is at (114, 70): work.mjs turns it about there. The handle goes under the pan so the joint has no seam. -->
+  <rect x="114" y="67" width="26" height="7" fill="#7a4a2e"/>
+  <rect x="114" y="67" width="26" height="1" fill="#5b3b26"/>
+  <rect x="114" y="68" width="26" height="1" fill="#a46a42"/>
+  <rect x="114" y="73" width="26" height="1" fill="#5b3b26"/>
+  <path d="M139 68H193V72.5L189.5 78H143L141 73.5L139 72.5Z" fill="#28282e"/>
+  <rect x="146" y="69" width="33" height="4" rx="1.5" fill="#44444e"/>
+  <rect x="137" y="63" width="56" height="4" fill="#9698a0"/>
+  <rect x="137" y="67" width="56" height="1" fill="#6f7078"/>
+  <rect x="192" y="63" width="1" height="5" fill="#4b4c50"/>
+</svg>

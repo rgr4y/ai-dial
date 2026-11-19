@@ -18,7 +18,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { raw565a8, scenes as scriptedScenes, sets as scriptedSets } from './anim/send.mjs';
+import { raw565a8, scenes as sendScenes, sets as sendSets } from './anim/send.mjs';
+import { scenes as workScenes, sets as workSets } from './anim/work.mjs';
 import { render } from './anim/render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -29,6 +30,7 @@ const OUT = process.argv[3] ?? join(ROOT, 'bridge/assets/claude');
 const js = readFileSync(join(SRC, 'data.js'), 'utf8');
 const data = JSON.parse(js.slice(js.indexOf('{'), js.lastIndexOf('}') + 1));
 const pet = data.pets.find((p) => p.engine === 'claude');
+const scriptedScenes = { ...sendScenes, ...workScenes }, scriptedSets = { ...sendSets, ...workSets };
 
 // LVGL RLE (libs/rle/lv_rle.c) on 2-byte blocks, as lv_bin_decoder uses for RGB565A8. A control byte with bit 7 set
 // is followed by (ctrl & 0x7f) literal blocks; otherwise one block repeats ctrl times. The blob is padded to whole
@@ -145,7 +147,7 @@ for (const [role, key] of [['work', 'working'], ['build', 'working_alt'], ['send
   };
 }
 
-// Scripted scenes: parts rendered from art/claude/ by scripts/anim/ (add the next one to its own module, same exports).
+// Scripted scenes: parts rendered from art/claude/ by scripts/anim/ (each scene is its own module with the same exports; merge it in above).
 for (const [name, fr] of Object.entries(scriptedSets)) {
   sets[name] = [];
   fr.forEach((f, k) => { const px = render(f.svg); addFrame(name, k, px.w, px.h, px.rgba); });

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="43" viewBox="24 0 64 43">
+  <!-- Chef hat, work-scene coords (frame 0): three puffs over a band. work.mjs bobs it with the torso. -->
+  <g fill="#f8f5ee" stroke="#dcd6ca">
+    <circle cx="56" cy="15" r="14.5"/>
+    <circle cx="38" cy="21.5" r="12"/>
+    <circle cx="73" cy="21" r="12"/>
+  </g>
+  <rect x="31" y="24" width="50" height="13" fill="#f8f5ee"/>
+  <path d="M30.5 36.5H82.5V40A2 2 0 0 1 80.5 42H32.5A2 2 0 0 1 30.5 40Z" fill="#dedacf"/>
+  <rect x="30.5" y="36" width="52" height="1" fill="#eeeae0"/>
+  <rect x="32" y="41" width="49" height="1" fill="#c8c2b6"/>
+</svg>

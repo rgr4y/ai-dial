@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="140 48 20 20">
+  <!-- Orange slice, work-scene coords (frame 0), centre (150, 58). -->
+  <circle cx="150" cy="58" r="8.5" fill="#f6922a" stroke="#d77a1c" stroke-width=".8"/>
+  <circle cx="150" cy="58" r="6.8" fill="#ffc878"/>
+  <g stroke="#f6922a" stroke-width="1.2">
+    <path d="M150 51.2V64.8M143.2 58H156.8M145.2 53.2L154.8 62.8M154.8 53.2L145.2 62.8"/>
+  </g>
+</svg>
