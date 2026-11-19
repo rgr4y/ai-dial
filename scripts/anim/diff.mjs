@@ -12,28 +12,11 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { unrle } from './frames.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const { PNG } = createRequire(join(ROOT, 'bridge/package.json'))('pngjs');
 const TOL = 8;
-
-// Same as gen_buddy_pets.mjs unrle (LVGL lv_rle_decompress, 2-byte blocks). Copied: importing the generator runs it.
-function unrle(src, outLen) {
-  const out = Buffer.alloc(outLen + 2);
-  let r = 0, w = 0;
-  while (r < src.length && w < outLen) {
-    const c = src[r++];
-    if (c & 0x80) {
-      const b = (c & 0x7f) * 2;
-      src.copy(out, w, r, r + b);
-      r += b; w += b;
-    } else {
-      for (let k = 0; k < c; k++) src.copy(out, w + k * 2, r, r + 2);
-      r += 2; w += c * 2;
-    }
-  }
-  return out.subarray(0, outLen);
-}
 
 // .bin frame (24-byte lv_image_header_t + compressed header, RLE body of RGB565 plane then A8 plane) -> RGBA.
 function decodeBin(buf) {

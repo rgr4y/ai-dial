@@ -3,7 +3,7 @@
 //
 //     node scripts/anim/send.mjs [out-dir]        default build/anim/claude
 //
-// gen_buddy_pets.mjs imports { sets, scenes, raw565a8 } from here to ship the scene in the pack; importing writes nothing.
+// gen_buddy_pets.mjs imports { sets, scenes } from here to ship the scene in the pack; importing writes nothing.
 //
 // Output: <out>/<set>/<k>.bin (one LVGL RGB565A8 RLE frame each) and <out>/manifest.json (the scene table, same shape
 // as bridge/assets/claude/manifest.json). Check it against today's scene with
@@ -11,73 +11,17 @@
 //     node scripts/anim/diff.mjs bridge/assets/claude send build/anim/claude send build/anim/send-diff.png
 //
 // Rotation, scale and clipping happen here at render time; the device only translates frames.
-// rle/unrle/frameFile are copied from gen_buddy_pets.mjs: that file has no main guard, so importing it would run the
-// generator and rewrite bridge/assets/claude. Keep them in step with it.
 // Dependencies come from bridge/ (run `npm install` there once).
 import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { frameFile, raw565a8 } from './frames.mjs';
 import { render } from './render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ART = join(ROOT, 'art/claude');
 const OUT = resolve(process.argv[2] ?? join(ROOT, 'build/anim/claude'));
-
-// ---- LVGL frame files (copy of gen_buddy_pets.mjs) ------------------------------------------------------------
-const BLK = 2;
-function rle(raw) {
-  const buf = Buffer.concat([raw, Buffer.alloc(raw.length % BLK)]);
-  const n = buf.length / BLK, last = n - 1, out = [];
-  const same = (a, b) => buf.compare(buf, b * BLK, b * BLK + BLK, a * BLK, a * BLK + BLK) === 0;
-  let i = 0;
-  while (i < last) {
-    let r = 1;
-    while (i + r < last && r < 127 && same(i, i + r)) r++;
-    if (r >= 2) {
-      out.push(Buffer.from([r]), buf.subarray(i * BLK, i * BLK + BLK));
-      i += r;
-      continue;
-    }
-    let l = 1;
-    while (i + l < last && l < 127 && !(i + l + 1 < last && same(i + l, i + l + 1))) l++;
-    out.push(Buffer.from([0x80 | l]), buf.subarray(i * BLK, (i + l) * BLK));
-    i += l;
-  }
-  out.push(Buffer.from([0x81]), buf.subarray(last * BLK));
-  return Buffer.concat(out);
-}
-function unrle(src, outLen) {
-  const out = Buffer.alloc(outLen + BLK);
-  let r = 0, w = 0;
-  while (r < src.length && w < outLen) {
-    const c = src[r++];
-    if (c & 0x80) {
-      const b = (c & 0x7f) * BLK;
-      src.copy(out, w, r, r + b);
-      r += b; w += b;
-    } else {
-      for (let k = 0; k < c; k++) src.copy(out, w + k * BLK, r, r + BLK);
-      r += BLK; w += c * BLK;
-    }
-  }
-  return out.subarray(0, outLen);
-}
-function frameFile(w, h, raw) {
-  const body = rle(raw);
-  if (!unrle(body, raw.length).equals(raw)) throw new Error('RLE round trip failed');
-  const head = Buffer.alloc(24);
-  head.writeUInt8(0x19, 0);
-  head.writeUInt8(0x14, 1);
-  head.writeUInt16LE(0x08, 2);
-  head.writeUInt16LE(w, 4);
-  head.writeUInt16LE(h, 6);
-  head.writeUInt16LE(w * 2, 8);
-  head.writeUInt32LE(1, 12);
-  head.writeUInt32LE(body.length, 16);
-  head.writeUInt32LE(raw.length, 20);
-  return Buffer.concat([head, body]);
-}
 
 // ---- parts ---------------------------------------------------------------------------------------------------
 const part = (name) => readFileSync(join(ART, `${name}.svg`), 'utf8');
@@ -166,16 +110,6 @@ export const scenes = {
 };
 
 // ---- write ---------------------------------------------------------------------------------------------------
-export function raw565a8({ w, h, rgba }) {
-  const n = w * h, raw = Buffer.alloc(n * 3);
-  for (let i = 0; i < n; i++) {
-    const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
-    raw.writeUInt16LE(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), i * 2);  // as gen_buddy_pets.mjs; art colours are the shipped pack's decoded values
-    raw[n * 2 + i] = rgba[i * 4 + 3];
-  }
-  return raw;
-}
-
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   rmSync(OUT, { recursive: true, force: true });
   const files = {}, manifestSets = {};

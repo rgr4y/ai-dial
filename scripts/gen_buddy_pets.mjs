@@ -18,7 +18,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { raw565a8, scenes as sendScenes, sets as sendSets } from './anim/send.mjs';
+import { frameFile, raw565a8 } from './anim/frames.mjs';
+import { scenes as sendScenes, sets as sendSets } from './anim/send.mjs';
 import { scenes as workScenes, sets as workSets } from './anim/work.mjs';
 import { render } from './anim/render.mjs';
 
@@ -32,80 +33,13 @@ const data = JSON.parse(js.slice(js.indexOf('{'), js.lastIndexOf('}') + 1));
 const pet = data.pets.find((p) => p.engine === 'claude');
 const scriptedScenes = { ...sendScenes, ...workScenes }, scriptedSets = { ...sendSets, ...workSets };
 
-// LVGL RLE (libs/rle/lv_rle.c) on 2-byte blocks, as lv_bin_decoder uses for RGB565A8. A control byte with bit 7 set
-// is followed by (ctrl & 0x7f) literal blocks; otherwise one block repeats ctrl times. The blob is padded to whole
-// blocks and the last block always goes out as a literal, so a decoder that truncates at the output size never
-// drops real bytes.
-const BLK = 2;
-export function rle(raw) {
-  const buf = Buffer.concat([raw, Buffer.alloc(raw.length % BLK)]);
-  const n = buf.length / BLK, last = n - 1, out = [];
-  const same = (a, b) => buf.compare(buf, b * BLK, b * BLK + BLK, a * BLK, a * BLK + BLK) === 0;
-  let i = 0;
-  while (i < last) {
-    let r = 1;
-    while (i + r < last && r < 127 && same(i, i + r)) r++;
-    if (r >= 2) {
-      out.push(Buffer.from([r]), buf.subarray(i * BLK, i * BLK + BLK));
-      i += r;
-      continue;
-    }
-    let l = 1;
-    while (i + l < last && l < 127 && !(i + l + 1 < last && same(i + l, i + l + 1))) l++;
-    out.push(Buffer.from([0x80 | l]), buf.subarray(i * BLK, (i + l) * BLK));
-    i += l;
-  }
-  out.push(Buffer.from([0x81]), buf.subarray(last * BLK));
-  return Buffer.concat(out);
-}
-// Mirrors LVGL lv_rle_decompress, for the round-trip check.
-export function unrle(src, outLen) {
-  const out = Buffer.alloc(outLen + BLK);
-  let r = 0, w = 0;
-  while (r < src.length && w < outLen) {
-    const c = src[r++];
-    if (c & 0x80) {
-      const b = (c & 0x7f) * BLK;
-      src.copy(out, w, r, r + b);
-      r += b; w += b;
-    } else {
-      for (let k = 0; k < c; k++) src.copy(out, w + k * BLK, r, r + BLK);
-      r += BLK; w += c * BLK;
-    }
-  }
-  return out.subarray(0, outLen);
-}
-
-// lv_image_header_t (magic 0x19, cf RGB565A8 0x14, flags COMPRESSED 0x08, w, h, stride) + lv_image_compressed_t
-// header (method RLE = 1, compressed size, decompressed size) + RLE body.
-function frameFile(w, h, raw) {
-  const body = rle(raw);
-  if (!unrle(body, raw.length).equals(raw)) throw new Error('RLE round trip failed');
-  const head = Buffer.alloc(24);
-  head.writeUInt8(0x19, 0);
-  head.writeUInt8(0x14, 1);
-  head.writeUInt16LE(0x08, 2);
-  head.writeUInt16LE(w, 4);
-  head.writeUInt16LE(h, 6);
-  head.writeUInt16LE(w * 2, 8);
-  head.writeUInt32LE(1, 12);
-  head.writeUInt32LE(body.length, 16);
-  head.writeUInt32LE(raw.length, 20);
-  return Buffer.concat([head, body]);
-}
 
 const files = {}, sets = {}, blobs = {};  // blobs: path -> bytes, written only if the rev changed
 let rawBytes = 0, packedBytes = 0;
 
 // Pack one frame (straight-alpha RGBA) as <name>/<k>.bin.
 function addFrame(name, k, w, h, rgba) {
-  const n = w * h, raw = Buffer.alloc(n * 3);
-  for (let i = 0; i < n; i++) {
-    const r = rgba[i * 4], g = rgba[i * 4 + 1], b = rgba[i * 4 + 2];
-    raw.writeUInt16LE(((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3), i * 2);  // little-endian RGB565, as LVGL stores it
-    raw[n * 2 + i] = rgba[i * 4 + 3];
-  }
-  const file = frameFile(w, h, raw), path = `${name}/${k}.bin`;
+  const raw = raw565a8({ w, h, rgba }), file = frameFile(w, h, raw), path = `${name}/${k}.bin`;
   blobs[path] = file;
   files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
   sets[name].push(path);
