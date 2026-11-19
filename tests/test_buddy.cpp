@@ -11,24 +11,28 @@ int main() {
   Scene work;
   work.name = "claude_work";
   work.w = work.h = 117; work.dx = 1; work.dy = -4; work.steps = 26; work.step_ms = 55;
-  work.step_dy = {0, -1, -1, -1, -1, -1};
-  work.step_dy.resize(26);
-  work.ov_at = {{114, 43}};
+  Layer body, ov;
+  body.at = {{0, 0}, {0, -1}, {0, -1}, {0, -1}, {0, -1}, {0, -1}};
+  body.at.resize(26);
+  ov.at = {{114, 43}};
+  work.layers = {body, ov};
 
   // origin = ((466-117)>>1)+1, 233-(117>>1)+4-4 = (175, 175)
   Pt o = origin(work, 4);
   assert(o.x == 175 && o.y == 175);
   assert(step_at(work, 0) == 0 && step_at(work, 54) == 0 && step_at(work, 55) == 1);
   assert(step_at(work, 26 * 55) == 0);  // wraps
-  assert(body_pos(work, 4, 1).y == 174);  // step_dy -1
-  assert(ov_pos(work, work, 4, 0).x == 175 + 114 && ov_pos(work, work, 4, 0).y == 175 + 43);
+  assert(layer_pos(work, work, 4, 0, 1).y == 174);  // step_dy -1
+  assert(layer_pos(work, work, 4, 1, 0).x == 175 + 114 && layer_pos(work, work, 4, 1, 0).y == 175 + 43);
 
   // An attached scene (alert, w = h = 0) uses its base's origin, not its own.
   Scene alert;
   alert.name = "claude_alert";
   alert.step_ms = 110;
-  alert.ov_at = {{-31, -21}};
-  assert(ov_pos(alert, work, 4, 0).x == 175 - 31 && ov_pos(alert, work, 4, 0).y == 175 - 21);
+  Layer bubble;
+  bubble.at = {{-31, -21}};
+  alert.layers = {bubble};
+  assert(layer_pos(alert, work, 4, 0, 0).x == 175 - 31 && layer_pos(alert, work, 4, 0, 0).y == 175 - 21);
 
   puts("scene ok");
 }

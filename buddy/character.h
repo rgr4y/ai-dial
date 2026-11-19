@@ -204,9 +204,10 @@ inline bool load(const char *name) {
     s.name = o["name"] | kv.key().c_str();
     s.w = o["w"] | 0, s.h = o["h"] | 0, s.dx = o["dx"] | 0, s.dy = o["dy"] | 0;
     s.steps = o["steps"] | 1, s.step_ms = o["step_ms"] | 100;
-    s.body = set(o["body"]), s.ov = set(o["ov"]);
-    s.loop = ints<uint8_t>(o["loop"]), s.ov_loop = ints<uint8_t>(o["ov_loop"]), s.step_dy = ints<int8_t>(o["step_dy"]);
-    s.ov_at = pairs<int16_t>(o["ov_at"]), s.count_at = pairs<int16_t>(o["count_at"]);
+    s.layers.clear();
+    for (JsonVariantConst l : o["layers"].as<JsonArrayConst>())
+      s.layers.push_back({set(l["set"]), ints<uint8_t>(l["loop"]), pairs<int16_t>(l["at"])});
+    s.count_at = pairs<int16_t>(o["count_at"]);
     s.discs = o["discs"] | 0;
     for (JsonVariantConst d : o["disc"].as<JsonArrayConst>())
       s.disc.push_back({(int16_t) (d[0] | 0), (int16_t) (d[1] | 0), (int16_t) (d[2] | 0), d[3] | 0u});

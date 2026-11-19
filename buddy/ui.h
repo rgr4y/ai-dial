@@ -448,9 +448,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.scene.create(root);
   u.alert.create(root, true);
   lv_obj_set_style_text_font(u.alert.count, u.f.f26m, 0);
-  lv_obj_add_flag(u.alert.ov, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_set_ext_click_area(u.alert.ov, 14);  // bubble tap margin (ui_habitat.c:1206)
-  lv_obj_add_event_cb(u.alert.ov, on_reopen, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_flag(u.alert.layer[0], LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_ext_click_area(u.alert.layer[0], 14);  // bubble tap margin (ui_habitat.c:1206)
+  lv_obj_add_event_cb(u.alert.layer[0], on_reopen, LV_EVENT_CLICKED, nullptr);
 
   u.small = lv_image_create(root);
   lv_obj_remove_flag(u.small, LV_OBJ_FLAG_CLICKABLE);

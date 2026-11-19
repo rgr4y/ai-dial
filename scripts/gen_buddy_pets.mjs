@@ -124,12 +124,12 @@ for (const [role, key] of [['work', 'working'], ['build', 'working_alt'], ['send
   const steps = sc.steps;  // level 0 only (listening has 5 levels for voice loudness; we use the quiet one)
   scenes[role] = {
     name: sc.name, w: sc.w, h: sc.h, dx: sc.dx, dy: sc.dy, steps, step_ms: sc.step_ms,
-    body: sc.frames ? frames(sc.frames) : null,
-    loop: sc.loop ? sc.loop.slice(0, steps) : null,
-    step_dy: sc.step_dy ? sc.step_dy.slice(0, steps) : null,
-    ov: sc.overlay ? frames(sc.overlay.frames) : null,
-    ov_loop: sc.overlay ? sc.overlay.loop.slice(0, steps) : null,
-    ov_at: sc.overlay ? sc.overlay.at.slice(0, steps) : null,
+    // Layers back to front: body (translate by step_dy; missing = 0), then overlay.
+    layers: [
+      ...(sc.frames ? [{ set: frames(sc.frames), loop: sc.loop ? sc.loop.slice(0, steps) : null,
+        at: Array.from({ length: steps }, (_, k) => [0, sc.step_dy ? sc.step_dy[k] : 0]) }] : []),
+      ...(sc.overlay ? [{ set: frames(sc.overlay.frames), loop: sc.overlay.loop.slice(0, steps), at: sc.overlay.at.slice(0, steps) }] : []),
+    ],
     // Ring arc with half 180 and width >= 2r is a filled disc of radius r + w/2: [cx16, cy16, r16, 0xRRGGBB] per
     // step x discs.
     discs: sc.shapes ? sc.shapes.count : 0,
