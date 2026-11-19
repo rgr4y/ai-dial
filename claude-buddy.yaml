@@ -7,6 +7,12 @@
 substitutions:
   name: claude-buddy
   friendly_name: Claude Buddy
+  # Audio (from docs/esp32-dial.yaml). The slider (1-100) maps linearly onto the usable range: below volume_min it's
+  # inaudible, above volume_max it distorts. ES8311 reg 0x32: 0.75 = 0dB (0xBF), each 0.01 is about 1dB. 0 = mute.
+  i2s_bps: 16bit
+  i2s_sample_rate: "44100"
+  volume_min: "0.60"
+  volume_max: "0.72"
 
 packages:
   base: !include ../esphome/chicken-base.yaml
@@ -21,6 +27,11 @@ logger:
 
 esphome:
   on_boot:
+    - priority: -100
+      then:
+        - script.execute:
+            id: apply_current_volume
+            displayed_volume: !lambda "return id(speaker_volume_percent).state;"
     - priority: -150  # after buddy-ui.yaml's init
       then:
         - lambda: |-
@@ -63,13 +74,105 @@ ota:
     on_abort:
       - lambda: buddyui::ota(3, 0, 0);
 
-# NS4150B amp enable: no audio in this config, so hold it off rather than leave GPIO46 floating.
+# ---- Audio: ES8311 DAC -> NS4150B amp. Speaker, mixer, resamplers and media player from docs/esp32-dial.yaml ----
+# (no mic, no boot stream). Mixer and resampler layout from esphome-touchs3/esphome-touch-s3.yaml.
+i2s_audio:
+  - id: i2s_out
+    i2s_lrclk_pin:
+      number: GPIO45
+      ignore_strapping_warning: true  # board wiring: I2S WS
+    i2s_bclk_pin: GPIO9
+    i2s_mclk_pin: GPIO16
+
+audio_dac:
+  - platform: es8311
+    id: dac
+    i2c_id: bus_a
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+
+speaker:
+  - platform: i2s_audio
+    id: spk
+    i2s_audio_id: i2s_out
+    i2s_dout_pin: GPIO8
+    dac_type: external
+    audio_dac: dac
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+    channel: mono
+    buffer_duration: 500ms
+  - platform: mixer
+    id: speaker_out
+    output_speaker: spk
+    source_speakers:
+      - id: announcement_mixing_input
+        buffer_duration: 300ms
+        timeout: 500ms
+      - id: media_mixing_input
+        buffer_duration: 100ms
+        timeout: 500ms
+  - platform: resampler
+    id: announcement_resampler
+    output_speaker: announcement_mixing_input
+    sample_rate: ${i2s_sample_rate}
+    buffer_duration: 200ms
+  - platform: resampler
+    id: media_resampler
+    output_speaker: media_mixing_input
+    sample_rate: ${i2s_sample_rate}
+    buffer_duration: 100ms
+
+media_player:
+  - platform: speaker
+    id: player
+    # Read buffer per pipeline, in PSRAM. The old dial config used 2MB for its MP3 stream; 512KB each here, since the
+    # character pack also lives in PSRAM.
+    buffer_size: 512000
+    announcement_pipeline:
+      speaker: announcement_resampler
+      format: WAV
+      sample_rate: ${i2s_sample_rate}
+      num_channels: 1
+    media_pipeline:
+      speaker: media_resampler
+      format: NONE  # every codec (the default, FLAC only, rejected MP3 with ESP_ERR_NOT_SUPPORTED)
+      num_channels: 1  # the ES8311 is mono, so decode straight to mono
+
+number:
+  - platform: template
+    id: speaker_volume_percent
+    name: Speaker Volume
+    icon: mdi:volume-high
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: slider
+    set_action:
+      - script.execute:
+          id: apply_current_volume
+          displayed_volume: !lambda "return x;"
+
+script:
+  - id: apply_current_volume
+    parameters:
+      displayed_volume: float
+    then:
+      - media_player.volume_set:
+          id: player
+          volume: !lambda |-
+            if (displayed_volume <= 0) return 0.0f;
+            return ${volume_min} + (${volume_max} - ${volume_min}) * displayed_volume / 100.0f;
+
 switch:
   - platform: gpio
-    id: speaker_amp
-    internal: true
+    id: speaker_amp  # NS4150B enable
+    name: Speaker Amp
     pin:
       number: GPIO46
-      ignore_strapping_warning: true
-    restore_mode: ALWAYS_OFF
+      ignore_strapping_warning: true  # board wiring: amp enable
+    restore_mode: RESTORE_DEFAULT_ON
 
