@@ -159,7 +159,8 @@ inline void set_text(lv_obj_t *l, const char *t) {
   if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
 }
 inline lv_obj_t *mk_card(lv_obj_t *parent) {
-  // Recap / question card: x 41, w 384, radius 24, fill 0x1c1e26, rim 0x3d3f47 (focus.c:879-885).
+  // Recap card: radius 24, fill 0x1c1e26, rim 0x3d3f47 (focus.c:879-885). Harness x 41 w 384 clipped the round
+  // glass at 4 lines (bottom corners at r ~234) and touched the face-side battery %: x 49 w 368 keeps r <= 228.
   lv_obj_t *c = lv_obj_create(parent);
   lv_obj_remove_style_all(c);
   lv_obj_set_style_bg_color(c, lv_color_hex(CARD), 0);
@@ -169,8 +170,8 @@ inline lv_obj_t *mk_card(lv_obj_t *parent) {
   lv_obj_set_style_radius(c, 24, 0);
   lv_obj_set_style_pad_hor(c, 10, 0);
   lv_obj_set_style_pad_ver(c, 21, 0);
-  lv_obj_set_x(c, 41);
-  lv_obj_set_width(c, 384);
+  lv_obj_set_x(c, 49);
+  lv_obj_set_width(c, 368);
   lv_obj_set_height(c, LV_SIZE_CONTENT);
   return c;
 }
@@ -490,7 +491,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_flag(u.card, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
   u.card_text = mk_label(u.card, u.f.f30, RECAP);
-  lv_obj_set_width(u.card_text, 364);
+  lv_obj_set_width(u.card_text, 348);  // card 368 - 2 x 10 pad
   lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
   lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
   lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
