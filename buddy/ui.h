@@ -391,6 +391,13 @@ inline void on_root(lv_event_t *e) {
   update(now);
 }
 inline void on_card(lv_event_t *) { tap("card"); }
+// Double tap on the small Clawd above the reply: done with it, same as a card tap. The reply goes and the face
+// shows what's current: the working face if a turn started while reading, else home.
+// LVGL's streak window is the long-press time (650 ms, lv_indev.c indev_proc_short_click).
+inline void on_small(lv_event_t *) {
+  ui().card_manual = false;
+  tap("card");
+}
 inline void card_scroll_y(void *o, int32_t y);
 // Finger on the overflowing reply text: stop the autoscroll, restart the 5 s count on every touch/move.
 // LVGL sends no CLICKED / LONG_PRESSED after a scroll starts (lv_indev.c:1526, :1426), so a drag can't tap/hold.
@@ -490,7 +497,10 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_event_cb(u.alert.layer[0], on_reopen, LV_EVENT_CLICKED, nullptr);
 
   u.small = lv_image_create(root);
-  lv_obj_remove_flag(u.small, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(u.small, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(u.small, LV_OBJ_FLAG_EVENT_BUBBLE);  // press / hold still reach on_root
+  lv_obj_set_ext_click_area(u.small, 30);  // card is on top where they overlap; a card tap also dismisses
+  lv_obj_add_event_cb(u.small, on_small, LV_EVENT_DOUBLE_CLICKED, nullptr);
   u.card = mk_card(root);
   lv_obj_add_flag(u.card, LV_OBJ_FLAG_CLICKABLE);
   lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
@@ -962,10 +972,18 @@ inline void update(uint32_t now) {
   // ---- FACE (spec §2.9) ----
   bool recap = !running && !b->last_text().empty() && b->last_text_ms() > u.recap_cleared;
   bool waiting = s.waiting > 0;  // only reachable here once the prompt was put off
+  // Finger still on the reply (scrolled within CARD_MANUAL_MS): keep it up through a new turn; tick() hands back.
+  bool reading = u.card_manual && (now - u.card_manual_at < CARD_MANUAL_MS ||
+                                   lv_indev_get_state(lv_indev_get_next(nullptr)) == LV_INDEV_STATE_PRESSED);
   if (sending) {
     u.alert.stop();
     u.scene.play(character::find("send"), now, 0);  // voice face bias 0 (focus.c:670)
     arc_text(u.status_arc, "Sent", RELAX_LINE);
+  } else if (reading) {
+    u.scene.stop();
+    u.alert.stop();
+    vis.on(u.card);
+    vis.on(u.small);
   } else if (running) {
     const scene::Scene *sc = u.build ? character::find("build") : character::find("work");
     u.scene.play(sc, now, 4);
@@ -1117,8 +1135,10 @@ inline void tick(uint32_t now) {
     place_small(lv_obj_get_y(u.card), u.small_set == &character::pack().small.z6, now);
   }
   if (u.card_manual && !u.asleep && !lv_obj_has_flag(u.card, LV_OBJ_FLAG_HIDDEN) && now - u.card_manual_at >= CARD_MANUAL_MS &&
-      lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED)
+      lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED) {
     resume_card_anim();
+    update(now);  // a turn that started while reading takes the face now
+  }
   static uint8_t in_usage = 0;  // start/end the usage flash on time, not on the next 1 s update
   uint8_t w = (uint8_t) std::min<uint32_t>(now % USAGE_EVERY_MS / USAGE_SHOW_MS, 2);
   if (w != in_usage) {
