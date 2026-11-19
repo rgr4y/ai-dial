@@ -699,7 +699,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
 
   pick_hint();
   u.last_activity = lv_tick_get();
-  splash_in();  // boot: the view starts as BRAND, so update() sees no view change
+  // boot: no wordmark fade. The pack load blocks LVGL right after the first frame, and the fade would start at opacity 0.
   update(u.last_activity);
 }
 

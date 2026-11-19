@@ -170,7 +170,8 @@ template<typename T> std::vector<std::array<T, 2>> pairs(JsonVariantConst a) {
 }
 
 // Load /littlefs/<name>/manifest.json and every frame it names. Missing or bad pack: no scenes, the UI shows none.
-inline bool load(const char *name) {
+// `first` runs once the "relax" scene alone is loaded (4 frames), so boot can draw the splash pet before the rest.
+inline bool load(const char *name, void (*first)() = nullptr) {
   std::string dir = std::string(ROOT) + "/" + name + "/";
   PString js;
   if (!read_file(dir + "manifest.json", js)) {
@@ -185,9 +186,11 @@ inline bool load(const char *name) {
   uint32_t t0 = esphome::millis();
   size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
   std::map<std::string, std::vector<const lv_image_dsc_t *>> sets;
-  for (JsonPairConst kv : doc["sets"].as<JsonObjectConst>()) {
-    auto &v = sets[kv.key().c_str()];
-    for (JsonVariantConst p : kv.value().as<JsonArrayConst>()) {
+  // Decode one frame set unless already done. False on a bad frame.
+  auto need = [&](const char *key) {
+    if (sets.count(key)) return true;
+    auto &v = sets[key];
+    for (JsonVariantConst p : doc["sets"][key].as<JsonArrayConst>()) {
       esphome::App.feed_wdt();  // the whole pack decodes in one go at boot: longer than the 5 s task watchdog
       const lv_image_dsc_t *d = load_frame(dir + (p | ""));
       if (!d) {
@@ -196,14 +199,13 @@ inline bool load(const char *name) {
       }
       v.push_back(d);
     }
-  }
+    return true;
+  };
   auto set = [&](JsonVariantConst n) { return n.isNull() ? std::vector<const lv_image_dsc_t *>{} : sets[n | ""]; };
   Pack &pk = pack();
-  pk.rev = doc["rev"] | "";
-  for (JsonPairConst kv : doc["scenes"].as<JsonObjectConst>()) {
-    JsonObjectConst o = kv.value();
-    scene::Scene &s = pk.scenes[kv.key().c_str()];
-    s.name = o["name"] | kv.key().c_str();
+  auto build = [&](const char *key, JsonObjectConst o) {
+    scene::Scene &s = pk.scenes[key];
+    s.name = o["name"] | key;
     s.w = o["w"] | 0, s.h = o["h"] | 0, s.dx = o["dx"] | 0, s.dy = o["dy"] | 0;
     s.steps = o["steps"] | 1, s.step_ms = o["step_ms"] | 100;
     s.layers.clear();
@@ -211,9 +213,21 @@ inline bool load(const char *name) {
       s.layers.push_back({set(l["set"]), ints<uint8_t>(l["loop"]), pairs<int16_t>(l["at"])});
     s.count_at = pairs<int16_t>(o["count_at"]);
     s.discs = o["discs"] | 0;
+    s.disc.clear();
     for (JsonVariantConst d : o["disc"].as<JsonArrayConst>())
       s.disc.push_back({(int16_t) (d[0] | 0), (int16_t) (d[1] | 0), (int16_t) (d[2] | 0), d[3] | 0u});
+  };
+  JsonObjectConst relax = doc["scenes"]["relax"].as<JsonObjectConst>();
+  if (first && !relax.isNull()) {
+    for (JsonVariantConst l : relax["layers"].as<JsonArrayConst>())
+      if (!need(l["set"] | "")) return false;  // a bad relax frame: the relax scene isn't built yet
+    build("relax", relax);
+    first();
   }
+  for (JsonPairConst kv : doc["sets"].as<JsonObjectConst>())
+    if (!need(kv.key().c_str())) return false;  // ponytail: an early relax stays up on a corrupt pack
+  pk.rev = doc["rev"] | "";
+  for (JsonPairConst kv : doc["scenes"].as<JsonObjectConst>()) build(kv.key().c_str(), kv.value());
   JsonObjectConst sm = doc["small"];
   pk.small.z6 = set(sm["z6"]), pk.small.z4 = set(sm["z4"]);
   pk.small.loop = pairs<int8_t>(sm["loop"]);
