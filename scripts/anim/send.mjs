@@ -99,12 +99,6 @@ function wrapped(name, wrap) {
 // Letter art is 28x19 with its own origin at the letter's top-left.
 const LETTER_W = 28, LETTER_H = 19;
 const letterClip = (w) => ({ svg: part('letter').replace(/width="28"/, `width="${w}"`).replace('viewBox="0 0 28 19"', `viewBox="0 0 ${w} 19"`), w, h: LETTER_H });
-// Letter zoomed about its top-left to w x h pixels (it grows in from the mailbox end).
-function letterZoom(w, h) {
-  const s = part('letter');
-  return { svg: `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}"><g transform="scale(${w / LETTER_W} ${h / LETTER_H})">${inner(s)}</g></svg>`, w, h };
-}
-
 // Flag art lies flat, 28x10, pivot on the ball. Frame = flag turned by `deg` (negative = up) about the pivot, on the
 // smallest integer canvas that holds it; `at` is where that canvas sits in the scene.
 const FLAG_AT = [187, 37], PIVOT = [2.5, 3];
@@ -135,8 +129,7 @@ export const sets = {
   send_arm_r: [plain('arm-right'), wrapped('arm-right', (c) => `<g transform="translate(0 125) scale(1 -1)">${c}</g>`)],
   send_eyes: [plain('eyes-open'), plain('eyes-happy')],
   // 0 blank, 1 whole, 2-4 sliding into the mailbox slot (clipped at its edge), 5-8 growing back out
-  send_letter: [BLANK, letterClip(28), letterClip(18), letterClip(11), letterClip(4),
-    letterZoom(9, 7), letterZoom(18, 13), letterZoom(24, 17), letterZoom(27, 19)],
+  send_letter: [BLANK, letterClip(28), letterClip(18), letterClip(11), letterClip(4)],
   // 0 flat, then raised and lowered again (-90 is straight up)
   send_flag: [flagTurned(0), ...[-15, -61, -79, -83, -86, -88, -62, -21].map(flagTurned)],
 };
@@ -154,8 +147,7 @@ const byPose = (...frames) => every((s) => frames[pose[s]]);
 const L = (k, x, y) => [k, x, y];
 const letter = [
   ...Array(10).fill(L(1, 111, 41)), L(1, 114, 40), L(1, 119, 37), L(1, 126, 35), L(2, 133, 32), L(3, 140, 29), L(4, 147, 26),
-  ...Array(19).fill(L(0, 111, 41)),
-  L(5, 121, 47), L(6, 116, 44), L(7, 113, 42), L(8, 112, 41), L(1, 111, 41),
+  ...Array(24).fill(L(0, 111, 41)),
 ].slice(0, STEPS);
 const flag = [...Array(17).fill(0), 1, 2, 3, 4, 5, ...Array(12).fill(6), 7, 8, 0, 0, 0, 0];
 
