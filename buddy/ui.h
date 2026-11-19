@@ -94,7 +94,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   const char *hint = "What's next?";
   lv_obj_t *shield = nullptr;          // while dark: eats touches so a wake tap can't hit [ allow ]
   bool small_was = false;
-  std::function<int()> battery;       // YAML: battery % when running on it, -1 when on USB or no cell
+  std::function<int()> battery;       // YAML: battery % when a cell is connected (also while charging), -1 otherwise
   std::function<bool()> on_usb;       // YAML: true when VBUS is present; unset = battery rules
   bool was_live = false;               // the bridge has talked since boot (splash says "offline", not "looking")
   std::string arc_txt[2];
@@ -866,7 +866,7 @@ inline void update(uint32_t now) {
   }
   // On battery: the 3 s right after the usage flash show the charge (hidden on USB, so docked stays clean).
   int bat = u.battery ? u.battery() : -1;
-  if (bat >= 0 && !sending && now % USAGE_EVERY_MS >= USAGE_SHOW_MS && now % USAGE_EVERY_MS < 2 * USAGE_SHOW_MS) {
+  if (bat >= 0 && !(u.on_usb && u.on_usb()) && !sending && now % USAGE_EVERY_MS >= USAGE_SHOW_MS && now % USAGE_EVERY_MS < 2 * USAGE_SHOW_MS) {
     char t[24];
     snprintf(t, sizeof(t), "Battery %d%%", bat);
     arc_text(u.status_arc, t, bat <= 15 ? USAGE_HOT : bat <= 30 ? USAGE_WARN : RELAX_LINE);
