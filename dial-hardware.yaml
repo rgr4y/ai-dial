@@ -1,0 +1,149 @@
+# Waveshare ESP32-S3-Touch-AMOLED-1.75C board package: SoC, flash layout, display, touch, PMU, buttons.
+# Included by claude-buddy.yaml. Pins: docs/PINMAP.md. Audio and IMU stay in the configs that use them.
+# The including config must define substitutions name/friendly_name and an `lvgl:` block.
+
+esp32:
+  variant: esp32s3
+  # 32MB split into equal thirds: app0, app1, littlefs (see esp32-dial.yaml for the arithmetic).
+  flash_size: 32MB
+  partitions:
+    - name: storage
+      type: data
+      subtype: littlefs
+      size: 0xA80000
+  framework:
+    type: esp-idf
+    advanced:
+      enable_idf_experimental_features: true  # OTA above 16MB
+    sdkconfig_options:
+      CONFIG_COMPILER_OPTIMIZATION_PERF: "y"
+      CONFIG_COMPILER_OPTIMIZATION_SIZE: "n"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+      CONFIG_PM_ENABLE: "y"  # dynamic frequency scaling, configured in on_boot below
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  # AXP2101: setup() enables a 4s PMU watchdog it never feeds; on_boot disables it below.
+  - source: github://m5stack/esphome-yaml
+    components: [axp2101]
+
+esphome:
+  includes:
+    - <esp_pm.h>
+  on_boot:
+    - priority: 200
+      then:
+        - lambda: id(pmu).disableWatchdog();
+    # Battery: drop the CPU to 40 MHz whenever nothing holds a PM lock. Wi-Fi, SPI (display flushes) and I2C take
+    # locks while busy, so renders still run at 240. Light sleep stays off: it would cut USB serial and jitter touch.
+    - priority: 600
+      then:
+        - lambda: |-
+            esp_pm_config_t pm = {.max_freq_mhz = 240, .min_freq_mhz = 40, .light_sleep_enable = false};
+            esp_err_t err = esp_pm_configure(&pm);
+            ESP_LOGI("power", "DFS 240/40 MHz: %s", esp_err_to_name(err));
+    # CST9220 sometimes NACKs its first command on a cold power-up ("Failed to enter command mode"); serial resets
+    # never hit it. Once everything else is up, run its setup again (setup re-pulses its reset line).
+    - priority: -100
+      then:
+        - delay: 300ms
+        - lambda: |-
+            if (!id(touch).is_failed()) return;
+            ESP_LOGW("touch", "touchscreen failed at boot, retrying setup");
+            id(touch).reset_to_construction_state();
+            id(touch).call();  // construction -> setup
+            id(touch).call();  // setup -> loop
+            id(touch).enable_loop();
+
+i2c:
+  - id: bus_a
+    sda: GPIO15
+    scl: GPIO14
+    frequency: 400kHz
+
+spi:
+  - id: display_qspi
+    type: quad
+    clk_pin: GPIO38
+    data_pins: [GPIO4, GPIO5, GPIO6, GPIO7]
+
+display:
+  - platform: mipi_spi
+    id: disp
+    model: WAVESHARE-ESP32-S3-TOUCH-AMOLED-1.75
+    spi_id: display_qspi
+    reset_pin: GPIO1  # the preset says 39 (non-C board)
+    data_rate: 80MHz
+    auto_clear_enabled: false
+    update_interval: never
+
+output:
+  - platform: template
+    id: panel_brightness
+    type: float
+    write_action:
+      - lambda: id(disp).set_brightness(state * 255);
+
+light:
+  - platform: monochromatic
+    id: display_brightness
+    name: Display Brightness
+    output: panel_brightness
+    default_transition_length: 0s
+    restore_mode: ALWAYS_ON  # ui.h owns sleep; restoring a saved "off" booted the panel dark
+    initial_state:
+      brightness: 80%
+
+touchscreen:
+  - platform: cst9220
+    id: touch
+    display: disp
+    i2c_id: bus_a
+    interrupt_pin: GPIO11
+    reset_pin: GPIO2
+    transform:
+      mirror_x: true
+      mirror_y: true
+
+axp2101:
+  id: pmu
+  i2c_id: bus_a
+
+sensor:
+  - platform: axp2101
+    id: pmu_sensors
+    axp2101_id: pmu
+    battery_level:
+      id: bat_level
+      name: Battery Level
+    battery_voltage:
+      id: bat_voltage
+      name: Battery Voltage
+    battery_charging:
+      id: bat_charging
+      name: Battery Charging
+
+binary_sensor:
+  # PWR key: AXP2101 PWRON via BSS138 to GPIO3, HIGH while pressed. PMU powers off on a 4s hold.
+  - platform: gpio
+    id: btn_pwr
+    name: PWR Key
+    pin:
+      number: GPIO3
+      ignore_strapping_warning: true
+    filters:
+      - delayed_on_off: 20ms
+  # BOOT key (GPIO0, pull-up). Held at power-on = ROM download mode.
+  - platform: gpio
+    id: btn_boot
+    name: BOOT Key
+    pin:
+      number: GPIO0
+      inverted: true
+      ignore_strapping_warning: true
+    filters:
+      - delayed_on_off: 20ms

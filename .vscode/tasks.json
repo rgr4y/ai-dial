@@ -1,0 +1,27 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "ESPHome: Run (USB)",
+      "type": "shell",
+      "command": "d=$(espusb); [ -n \"$d\" ] || { echo 'No USB serial port (/dev/cu.usb*): plug the dial in with a data cable'; exit 1; }; esphome run \"${file}\" --device \"$d\"",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true },
+      "group": { "kind": "build", "isDefault": true }
+    },
+    {
+      "label": "ESPHome: Run (OTA)",
+      "type": "shell",
+      "command": "esphome run \"${file}\" --device OTA",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    },
+    {
+      "label": "ESPHome: Logs (OTA)",
+      "type": "shell",
+      "command": "esphome logs \"${file}\" --device OTA",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
+    }
+  ]
+}

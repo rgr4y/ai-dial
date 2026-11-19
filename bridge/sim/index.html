@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Dial Simulator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap" rel="stylesheet">
+  <style>
+    :root { --bg: #101114; --fg: #e6e4e0; --dim: #8a8890; --ok: #0dbc79; --bad: #e7a6ad; --line: #26272d; }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.45 Inter, system-ui, sans-serif;
+           display: grid; grid-template-columns: minmax(0, 560px) minmax(0, 1fr); gap: 24px; padding: 24px; min-height: 100vh; }
+    @media (max-width: 900px) { body { grid-template-columns: 1fr; padding: 16px; } }
+    .pendant { display: grid; justify-items: center; gap: 18px; }
+    /* Brushed-aluminium bezel around the 466 px round glass, like the CNC case. */
+    .bezel { width: min(100%, 530px); aspect-ratio: 1; border-radius: 50%; padding: 32px;
+             background: radial-gradient(circle at 35% 30%, #4a4c52, #1d1e22 70%); box-shadow: 0 20px 60px #0008, inset 0 2px 3px #fff2; }
+    canvas { width: 100%; height: 100%; border-radius: 50%; display: block; background: #000; cursor: pointer; touch-action: none; }
+    .keys { display: flex; gap: 12px; }
+    button { font: inherit; color: var(--fg); background: #1c1d22; border: 1px solid var(--line); border-radius: 8px; padding: 8px 14px; cursor: pointer; }
+    button:hover { border-color: #555; }
+    .panel { display: grid; gap: 12px; align-content: start; min-width: 0; }
+    .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .pill { padding: 2px 10px; border-radius: 999px; background: #1c1d22; border: 1px solid var(--line); }
+    .pill.on { color: var(--ok); } .pill.off { color: var(--bad); }
+    pre { margin: 0; background: #0b0c0e; border: 1px solid var(--line); border-radius: 8px; padding: 12px; overflow: auto; max-height: 38vh;
+          font: 12px/1.4 ui-monospace, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+    h2 { font-size: 13px; color: var(--dim); font-weight: 500; margin: 4px 0 0; text-transform: uppercase; letter-spacing: .06em; }
+    .hint { color: var(--dim); font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div class="pendant">
+    <div class="bezel"><canvas id="glass" width="466" height="466"></canvas></div>
+    <div class="keys">
+      <button id="pwr" title="PWR key: screen on/off">PWR</button>
+      <button id="boot" title="BOOT key: back / later">BOOT</button>
+    </div>
+    <div class="hint">Click = tap · hold 650 ms = hold · drag right = swipe back</div>
+  </div>
+  <div class="panel">
+    <div class="row"><span id="dial" class="pill off">dial offline</span><span id="ws" class="pill off">bridge offline</span></div>
+    <h2>preview (local only, not sent to the dial)</h2>
+    <div class="row" id="previews"></div>
+    <h2>ui (from the dial)</h2>
+    <pre id="ui">waiting…</pre>
+    <h2>last line to the dial</h2>
+    <pre id="line">waiting…</pre>
+  </div>
+  <script src="/data.js"></script>
+  <script type="module" src="./main.js"></script>
+</body>
+</html>

@@ -1,0 +1,494 @@
+# Waveshare ESP32-S3-Touch-AMOLED-1.75C (ex-Autonomous "Harness" dial). Base hardware config.
+# Pins verified against the Waveshare 1.75C schematic: see docs/PINMAP.md.
+# 1.75C vs the non-C 1.75 (and ESPHome's preset): LCD/touch reset on GPIO1/2 (not 39/40), MCLK GPIO16 (not 42), 32MB flash.
+#
+# secrets.yaml here is a symlink to ~/workspace/esphome/secrets.yaml.
+
+substitutions:
+  # One frame period for the LVGL refresh, the IMU sample rate and the cube's fling tick.
+  frame_ms: "16"
+  name: esp32-dial
+  friendly_name: ESP32 Dial
+  # Audio. The mic and speaker share BCLK/WS, so they must run at the same rate.
+  i2s_bps: 16bit
+  i2s_sample_rate: "44100"
+  # Original source: http://strm112.1.fm/blues_mobile_mp3 (256k joint stereo)
+  boot_stream_url: http://mimi.lan:8000/blues.mp3  # scripts/restream.sh on the Mac: 128k mono
+  # The slider (1-100) maps linearly onto the usable range. Below volume_min it's inaudible,
+  # above volume_max it distorts. ES8311 reg 0x32: 0.75 = 0dB (0xBF), each 0.01 is about 1dB. 0.72 is about -3dB of headroom. 0 = mute.
+  volume_min: "0.60"
+  volume_max: "0.72"
+
+packages:
+  base: !include ../esphome/chicken-base.yaml
+
+logger:
+  level: INFO  # DEBUG removed from the build too: less flash, and no per-sample sensor spam
+
+esp32:
+  variant: esp32s3
+  # 32MB split into equal thirds: app0, app1 and littlefs at 10.5MB each (0xA80000).
+  # ESPHome reserves 0x80000 (bootloader, table, otadata, phy_init, 448K nvs) and gives the
+  # rest, minus custom partitions, to the two app slots. (0x2000000 - 0x80000) / 3 = 0xA80000, 64K-aligned.
+  flash_size: 32MB
+  partitions:
+    - name: storage
+      type: data
+      subtype: littlefs
+      size: 0xA80000
+  framework:
+    type: esp-idf
+    advanced:
+      # Required for OTA above 16MB. It sets CONFIG_BOOTLOADER_CACHE_32BIT_ADDR_QUAD_FLASH.
+      enable_idf_experimental_features: true
+    # Render speed tweaks from touchs3-obddash. Leave execute_from_psram off (the default):
+    # in obddash it dropped rendering to ~10fps, while cached flash XIP is faster.
+    sdkconfig_options:
+      CONFIG_COMPILER_OPTIMIZATION_PERF: "y"  # -O2 instead of ESPHome's -Os
+      CONFIG_COMPILER_OPTIMIZATION_SIZE: "n"
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"     # bigger, wider data cache for PSRAM/flash bursts
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+external_components:
+  # The AXP2101 isn't in ESPHome core. setup() enables a 4s PMU watchdog and never feeds it,
+  # so on_boot disables it below. It also sets charge to 200mA / 4.1V and CHGLED solid on.
+  - source: github://m5stack/esphome-yaml
+    components: [axp2101]
+
+esphome:
+  includes:
+    - cube.h  # cube state machine and projection; host test in test_cube.cpp
+  on_boot:
+    - priority: 200  # runs after hardware setup (axp2101 setup has run)
+      then:
+        - lambda: id(pmu).disableWatchdog();
+    - priority: -100
+      then:
+        - script.execute:
+            id: apply_current_volume
+            displayed_volume: !lambda "return id(speaker_volume_percent).state;"
+        # Time whole LVGL frames for the FPS label: REFR_START here, REFR_READY in on_draw_end.
+        - lambda: |-
+            lv_display_add_event_cb(lv_display_get_default(),
+                [](lv_event_t *) { id(draw_start_us) = micros(); }, LV_EVENT_REFR_START, nullptr);
+
+wifi:
+  use_psram: true
+  on_connect:
+    then:
+      - script.execute: play_boot_stream
+
+# ---- I2C: touch 0x5A, PMU 0x34, ES8311 0x18, ES7210 0x40, QMI8658 0x6B ----
+i2c:
+  - id: bus_a
+    sda: GPIO15
+    scl: GPIO14
+    frequency: 400kHz
+    scan: true
+
+# ---- Display: CO5300 466x466 over QSPI ----
+spi:
+  - id: display_qspi
+    type: quad
+    clk_pin: GPIO38
+    data_pins: [GPIO4, GPIO5, GPIO6, GPIO7]
+
+display:
+  - platform: mipi_spi
+    id: disp
+    model: WAVESHARE-ESP32-S3-TOUCH-AMOLED-1.75
+    spi_id: display_qspi
+    reset_pin: GPIO1  # the preset says 39, which is the non-C board
+    # The CO5300 has no default rate, so mipi_spi uses 10MHz: ~87ms per full frame, about 11fps.
+    # Harness runs this panel at 40MHz QSPI (display_habitat.c:459): ~22ms per frame.
+    # 80MHz QSPI: a ~300px cube box is ~180KB, so flush takes ~4.5ms instead of ~9ms at 40MHz.
+    # If the panel ever shows garbage, drop to 40MHz (the rate Harness used on this panel).
+    data_rate: 80MHz
+    auto_clear_enabled: false
+    update_interval: never  # LVGL drives redraws
+
+# AMOLED has no backlight; brightness is a panel command.
+output:
+  - platform: template
+    id: panel_brightness
+    type: float
+    write_action:
+      - lambda: id(disp).set_brightness(state * 255);
+
+light:
+  - platform: monochromatic
+    id: display_brightness
+    name: Display Brightness
+    output: panel_brightness
+    default_transition_length: 0s
+    restore_mode: RESTORE_DEFAULT_ON
+    initial_state:
+      brightness: 80%
+
+# ---- Touch: CST9217 (core cst9220), mounted 180° to the panel ----
+touchscreen:
+  - platform: cst9220
+    id: touch
+    display: disp
+    i2c_id: bus_a
+    interrupt_pin: GPIO11
+    reset_pin: GPIO2
+    transform:
+      mirror_x: true
+      mirror_y: true
+    # Cube grab, drag, fling and double-tap (cube.h). Coordinates are already in display space.
+    on_touch:
+      - lambda: dialcube::on_touch(touch.x, touch.y, millis());
+    on_update:
+      - lambda: |-
+          if (!touches.empty() && dialcube::on_move(touches[0].x, touches[0].y, millis()))
+            dialcube::render(id(cube));
+    on_release:
+      - lambda: dialcube::on_release(millis());
+
+lvgl:
+  displays: [disp]
+  touchscreens: [touch]
+  # 25% is the largest buffer ESPHome keeps in internal SRAM; 50%/100% go to PSRAM and
+  # render slower (from obddash).
+  buffer_size: 25%
+  refresh_interval: ${frame_ms}ms
+  # Count completed LVGL refresh cycles (LV_EVENT_REFR_READY) for the FPS counter.
+  # FPS counter plus average render time (draw start to end, including flush). If render time is
+  # close to 1000/fps, drawing or flushing is the limit. If it's much less, the loop is starving LVGL.
+  # The start time comes from LV_EVENT_REFR_START, registered in on_boot. That fires once per
+  # frame; on_draw_start (RENDER_START) can fire per buffer chunk, which made ms read low.
+  on_draw_end:
+    - lambda: |-
+        id(frame_count)++;
+        id(draw_total_us) += micros() - id(draw_start_us);
+  bg_color: 0x000000    # applies to all pages; on an AMOLED, black pixels are off
+  text_color: 0xFFFFFF  # the default theme's text is dark, which disappears on black
+  pages:
+    - id: main_page
+      widgets:
+        # Wireframe cube, drawn by dialcube::render() straight into this canvas's buffer
+        # (cube.h, 3px Bresenham), which invalidates only the box that changed. It's listed
+        # first so the labels draw on top. Buffer: 466x466 RGB565, ~434KB.
+        - canvas:
+            id: cube
+            x: 0
+            y: 0
+            width: 466
+            height: 466
+        - label:
+            id: lbl_status
+            align: TOP_MID
+            y: 40
+            text: "YESH"
+            text_font: montserrat_48
+        - label:
+            id: lbl_fps
+            align: BOTTOM_MID
+            y: -60  # round glass: the chord is only ~300px wide this close to the bottom
+            text: "-- fps"
+            text_font: montserrat_20
+
+# ---- IMU: QMI8658 @0x6B (INT1 GPIO21, not wired in) ----
+motion:
+  - platform: qmi8658
+    id: imu
+    i2c_id: bus_a
+    accelerometer_odr: 125HZ
+    gyroscope_odr: 125HZ
+    update_interval: ${frame_ms}ms  # the 125Hz ODR gives a fresh sample every tick
+
+# ---- PMU: AXP2101 @0x34 ----
+axp2101:
+  id: pmu
+  i2c_id: bus_a
+
+# ---- Audio: ES8311 (speaker) + ES7210 (dual mic) sharing one I2S bus ----
+# On ESPHome 2026.10 the speaker and mic take turns. 2026.11 adds single-bus full_duplex (#19959):
+# when you upgrade, merge these into one bus.
+i2s_audio:
+  - id: i2s_out
+    i2s_lrclk_pin:
+      number: GPIO45
+      allow_other_uses: true
+      ignore_strapping_warning: true  # board wiring: I2S WS
+    i2s_bclk_pin:
+      number: GPIO9
+      allow_other_uses: true
+    i2s_mclk_pin: GPIO16
+  - id: i2s_in
+    i2s_lrclk_pin:
+      number: GPIO45
+      allow_other_uses: true
+      ignore_strapping_warning: true  # board wiring: I2S WS
+    i2s_bclk_pin:
+      number: GPIO9
+      allow_other_uses: true
+
+audio_dac:
+  - platform: es8311
+    id: dac
+    i2c_id: bus_a
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+
+audio_adc:
+  - platform: es7210
+    id: adc
+    i2c_id: bus_a
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+
+speaker:
+  - platform: i2s_audio
+    id: spk
+    i2s_audio_id: i2s_out
+    i2s_dout_pin: GPIO8
+    dac_type: external
+    audio_dac: dac
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+    channel: mono
+    buffer_duration: 500ms
+  # Mixer and resampler layout taken from esphome-touchs3/esphome-touch-s3.yaml.
+  - platform: mixer
+    id: speaker_out
+    output_speaker: spk
+    source_speakers:
+      - id: announcement_mixing_input
+        buffer_duration: 300ms
+        timeout: 500ms
+      - id: media_mixing_input
+        buffer_duration: 100ms
+        timeout: 500ms
+  - platform: resampler
+    id: announcement_resampler
+    output_speaker: announcement_mixing_input
+    sample_rate: ${i2s_sample_rate}
+    buffer_duration: 200ms
+  - platform: resampler
+    id: media_resampler
+    output_speaker: media_mixing_input
+    sample_rate: ${i2s_sample_rate}
+    buffer_duration: 100ms
+
+media_player:
+  - platform: speaker
+    id: player
+    # Read buffer per pipeline, in PSRAM. Default is 1MB. 2MB x 2 pipelines = 4MB of the 8MB.
+    buffer_size: 2000000
+    announcement_pipeline:
+      speaker: announcement_resampler
+      format: WAV
+      sample_rate: ${i2s_sample_rate}
+      num_channels: 1
+    media_pipeline:
+      speaker: media_resampler
+      # Since 2026.10 the format chooses which codecs get compiled. The default is FLAC only,
+      # which made the MP3 stream fail with ESP_ERR_NOT_SUPPORTED. NONE compiles every codec.
+      format: NONE
+      num_channels: 1  # the ES8311 is mono, so decode straight to mono
+
+number:
+  - platform: template
+    id: speaker_volume_percent
+    name: Speaker Volume
+    icon: mdi:volume-high
+    optimistic: true
+    restore_value: true
+    initial_value: 50
+    min_value: 0
+    max_value: 100
+    step: 1
+    mode: slider
+    set_action:
+      - script.execute:
+          id: apply_current_volume
+          displayed_volume: !lambda "return x;"
+
+script:
+  - id: play_boot_stream
+    mode: restart
+    then:
+      - if:
+          condition:
+            lambda: "return id(boot_stream_started) || !id(stream_enabled).state;"
+          then:
+            - logger.log: "Boot stream already started or disabled; skipping."
+            - script.stop: play_boot_stream
+      - lambda: "id(boot_stream_started) = true;"
+      - media_player.stop: player
+      - delay: 250ms
+      - media_player.play_media:
+          id: player
+          media_url: "${boot_stream_url}"
+  - id: apply_current_volume
+    parameters:
+      displayed_volume: float
+    then:
+      - media_player.volume_set:
+          id: player
+          volume: !lambda |-
+            if (displayed_volume <= 0) return 0.0f;
+            return ${volume_min} + (${volume_max} - ${volume_min}) * displayed_volume / 100.0f;
+
+globals:
+  - id: frame_count
+    type: uint32_t
+    initial_value: "0"
+  - id: draw_start_us
+    type: uint32_t
+    initial_value: "0"
+  - id: draw_total_us
+    type: uint32_t
+    initial_value: "0"
+  - id: boot_stream_started  # play once per boot; Wi-Fi reconnects don't restart it
+    type: bool
+    initial_value: "false"
+
+microphone:
+  - platform: i2s_audio
+    id: mic
+    i2s_audio_id: i2s_in
+    i2s_din_pin: GPIO10
+    adc_type: external
+    pdm: false
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+
+switch:
+  # Stream on/off. Off stops the media pipeline, which frees its read buffer, decoder and
+  # tasks. The setting is saved, so a disabled stream stays off across reboots.
+  - platform: template
+    id: stream_enabled
+    name: Stream
+    icon: mdi:radio
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_ON
+    on_turn_on:
+      - if:
+          condition:
+            wifi.connected:
+          then:
+            - media_player.play_media:
+                id: player
+                media_url: "${boot_stream_url}"
+    on_turn_off:
+      - media_player.stop: player
+  - platform: gpio
+    id: speaker_amp  # NS4150B enable
+    name: Speaker Amp
+    pin:
+      number: GPIO46
+      ignore_strapping_warning: true  # board wiring: amp enable
+    restore_mode: RESTORE_DEFAULT_ON
+
+# ---- Buttons ----
+binary_sensor:
+  # PWR key: AXP2101 PWRON, mirrored through a BSS138 to GPIO3 (HIGH while pressed).
+  # The PMU still powers off on a 4s hold.
+  - platform: gpio
+    id: btn_pwr
+    name: PWR Key
+    pin:
+      number: GPIO3
+      ignore_strapping_warning: true  # board wiring: PWR key via BSS138
+    on_press:
+      - lambda: |-
+          // Cycle the cube's colour.
+          static const uint32_t COLORS[] = {0x00E5FF, 0xFF2D95, 0x7CFF00, 0xFFB000, 0xB388FF, 0xFFFFFF};
+          static uint8_t i = 0;
+          i = (i + 1) % (sizeof(COLORS) / sizeof(COLORS[0]));
+          dialcube::color() = COLORS[i];
+          dialcube::render(id(cube));
+  # BOOT (GPIO0, 10k pull-up). Holding it at power-on enters the ROM download mode.
+  - platform: gpio
+    id: btn_boot
+    name: BOOT Key
+    pin:
+      number: GPIO0
+      inverted: true
+      ignore_strapping_warning: true
+    filters:
+      - delayed_on_off: 20ms
+    on_press:
+      # Toggle the screen with a 1s fade. LVGL pauses while it's dark, which saves CPU.
+      - if:
+          condition:
+            light.is_on: display_brightness
+          then:
+            - light.turn_off:
+                id: display_brightness
+                transition_length: 1s
+            - delay: 1s
+            - lvgl.pause:
+          else:
+            - lvgl.resume:
+            - light.turn_on:
+                id: display_brightness
+                transition_length: 1s
+
+sensor:
+  # Tilt from the accelerometer. It gives pitch and roll only; yaw would need the gyro.
+  - platform: motion
+    motion_id: imu
+    type: pitch
+    id: imu_pitch
+    internal: true
+    filters:
+      - exponential_moving_average: { alpha: 0.35, send_every: 1 }
+  - platform: motion
+    motion_id: imu
+    type: roll
+    id: imu_roll
+    internal: true
+    filters:
+      - exponential_moving_average: { alpha: 0.35, send_every: 1 }
+    on_value:
+      - lambda: |-
+          // In MOTION mode the cube eases toward the tilt. In MANUAL, the IMU is ignored (cube.h).
+          if (dialcube::on_imu(id(imu_pitch).state, x)) dialcube::render(id(cube));
+  - platform: axp2101
+    id: pmu_sensors  # the M5 platform requires an id or name
+    axp2101_id: pmu
+    battery_level:
+      name: Battery Level
+    battery_voltage:
+      name: Battery Voltage
+    axp_temperature:
+      name: PMU Temperature
+      entity_category: diagnostic
+    battery_charging:  # binary sensor, but it lives in the sensor platform
+      name: Battery Charging
+
+# FPS counter: once a second, show how many LVGL frames completed in that second.
+# Updating the label causes one extra frame per second, which is counted too.
+interval:
+  # Fling momentum and the idle timeout back to MOTION.
+  - interval: ${frame_ms}ms
+    then:
+      - lambda: |-
+          static uint32_t last = millis();
+          const uint32_t now = millis();
+          if (dialcube::tick(now, now - last)) dialcube::render(id(cube));
+          last = now;
+  - interval: 1s
+    then:
+      - lvgl.label.update:
+          id: lbl_fps
+          text: !lambda |-
+            static char buf[48];
+            const uint32_t n = id(frame_count);
+            // fps = LVGL refreshes completed (what reaches the panel), ms = average render+flush time,
+            // upd = cube redraws requested. upd > fps means LVGL merges several redraws into one refresh.
+            snprintf(buf, sizeof(buf), "%u fps  %u ms  %u upd", (unsigned) n,
+                     (unsigned) (n ? id(draw_total_us) / n / 1000 : 0), (unsigned) dialcube::render_count());
+            dialcube::render_count() = 0;
+            ESP_LOGI("fps", "%s", buf);
+            id(frame_count) = 0;
+            id(draw_total_us) = 0;
+            return buf;
