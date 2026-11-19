@@ -1,0 +1,153 @@
+# Desktop simulator: the dial's real UI code (buddy-ui.yaml: buddy/ui.h, scene.h, character.h, LVGL) built for the
+# host against an SDL window instead of the AMOLED. UI changes are previewed here before they go to the dial.
+#
+#   esphome run claude-buddy-sim.yaml     # needs SDL2 (brew install sdl2-compat)
+#
+# The bridge drives it like the dial over the native API on 127.0.0.1:6053: add 127.0.0.1 to DIAL_HOST.
+# Pets load straight from bridge/assets ($DIAL_ASSETS overrides), no LittleFS or sync.
+# Mouse = touch. PWR / BOOT: click the keys on the case edge, or press p / b with the window focused.
+
+substitutions:
+  name: claude-buddy-sim
+  friendly_name: Claude Buddy Sim
+  # The 466 glass sits centred in a bigger window (WIN - 466) / 2 in, so the case and keys fit around it.
+  ui_root: >-
+    [] { lv_obj_t *o = lv_obj_create(lv_scr_act()); lv_obj_remove_style_all(o);
+         lv_obj_set_size(o, 466, 466); lv_obj_set_pos(o, 87, 87); return o; }()
+
+host:
+
+logger:
+  level: INFO
+
+api:
+  reboot_timeout: 0s
+  encryption:
+    key: !secret api_key  # same key as the dial, so the bridge needs nothing extra
+
+packages:
+  ui: !include buddy-ui.yaml
+
+# Dressing on the top layer (never touchable except the keys): case at true scale (55 mm case / 43.76 mm glass,
+# Waveshare size drawing), corners masked, glass edge ringed, PWR and BOOT on the right edge where the real
+# ones are (~1:30 and ~4 o'clock seen from the front). Clicking a key drives the same binary sensor as its hotkey.
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  on_boot:
+    # Remember the window position across runs (macOS forgets SDL windows): restored here, saved on every move.
+    # sdl2-compat window ids aren't predictable, so find ours by scanning.
+    - priority: -200
+      then:
+        - lambda: |-
+            int x, y;
+            FILE *f = fopen("build/sim-window.pos", "r");
+            if (f && fscanf(f, "%d %d", &x, &y) == 2)
+              for (uint32_t i = 1; i < 1000; i++)
+                if (SDL_Window *w = SDL_GetWindowFromID(i)) {
+                  SDL_SetWindowPosition(w, x, y);
+                  break;
+                }
+            if (f) fclose(f);
+            SDL_AddEventWatch([](void *, SDL_Event *e) -> int {
+              if (e->type == SDL_WINDOWEVENT && e->window.event == SDL_WINDOWEVENT_MOVED)
+                if (FILE *f = fopen("build/sim-window.pos", "w")) {
+                  fprintf(f, "%d %d\n", e->window.data1, e->window.data2);
+                  fclose(f);
+                }
+              return 0;
+            }, nullptr);
+    - priority: -200
+      then:
+        - lambda: |-
+            // SDL keys never publish a starting state, so ESPHome would treat the first press as the initial
+            // state and skip its triggers. The dial's GPIO keys publish theirs in setup.
+            id(btn_pwr).publish_initial_state(false);
+            id(btn_boot).publish_initial_state(false);
+            constexpr int WIN = 640, C = WIN / 2, D = 466, CASE = 586;
+            auto ring = [](int size, int width, uint32_t color) {
+              lv_obj_t *o = lv_obj_create(lv_layer_top());
+              lv_obj_remove_style_all(o);
+              lv_obj_set_size(o, size, size);
+              lv_obj_set_pos(o, C - size / 2, C - size / 2);
+              lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
+              lv_obj_set_style_border_width(o, width, 0);
+              lv_obj_set_style_border_color(o, lv_color_hex(color), 0);
+              lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
+              lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+            };
+            lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x101014), 0);
+            ring(CASE + 2 * 60, 60, 0x101014);         // window outside the case (covers the UI square's corners)
+            ring(CASE, (CASE - D) / 2, 0x2c2e36);      // case bezel
+            ring(CASE, 2, 0x4a4c56);                   // case rim
+            ring(D, 1, 0x5a5c66);                      // glass edge
+
+            auto key = [](const char *name, float deg, binary_sensor::BinarySensor *bs) {
+              constexpr int KW = 12, KH = 46, R = CASE / 2 + 4, LR = CASE / 2 + 36;
+              float a = deg * 3.14159265f / 180;
+              lv_obj_t *k = lv_obj_create(lv_layer_top());
+              lv_obj_remove_style_all(k);
+              lv_obj_set_size(k, KW, KH);
+              lv_obj_set_pos(k, C + R * cosf(a) - KW / 2, C + R * sinf(a) - KH / 2);
+              lv_obj_set_style_radius(k, KW / 2, 0);
+              lv_obj_set_style_bg_opa(k, LV_OPA_COVER, 0);
+              lv_obj_set_style_bg_color(k, lv_color_hex(0x8a8c96), 0);
+              lv_obj_set_style_bg_color(k, lv_color_hex(0xd8dae2), LV_STATE_PRESSED);
+              lv_obj_set_style_transform_pivot_x(k, KW / 2, 0);
+              lv_obj_set_style_transform_pivot_y(k, KH / 2, 0);
+              lv_obj_set_style_transform_rotation(k, (int) (deg * 10), 0);
+              lv_obj_set_ext_click_area(k, 14);
+              auto cb = [](lv_event_t *e) {
+                auto *s = (binary_sensor::BinarySensor *) lv_event_get_user_data(e);
+                s->publish_state(lv_event_get_code(e) == LV_EVENT_PRESSED);
+              };
+              for (auto code : {LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) lv_obj_add_event_cb(k, cb, code, bs);
+              lv_obj_t *l = lv_label_create(lv_layer_top());
+              lv_label_set_text(l, name);
+              lv_obj_set_style_text_font(l, id(inter_20)->get_lv_font(), 0);
+              lv_obj_set_style_text_color(l, lv_color_hex(0x8a8c96), 0);
+              lv_obj_update_layout(l);
+              lv_obj_set_pos(l, C + LR * cosf(a) - lv_obj_get_width(l) / 2, C + LR * sinf(a) - lv_obj_get_height(l) / 2);
+            };
+            key("PWR", -42, id(btn_pwr));
+            key("BOOT", 39, id(btn_boot));
+
+# ---- Board side (replaces dial-hardware.yaml) ----
+display:
+  - platform: sdl
+    id: disp
+    dimensions:
+      width: 640
+      height: 640
+    auto_clear_enabled: false
+    update_interval: never
+
+touchscreen:
+  - platform: sdl
+    id: touch
+    display: disp
+
+output:
+  - platform: template
+    id: panel_brightness
+    type: float
+    write_action:
+      # The panel going dark: LVGL is already paused (buddy-ui.yaml interval), so black the glass by hand.
+      # Wake resumes LVGL, which invalidates the whole screen and redraws it.
+      - lambda: |-
+          ESP_LOGD("sim", "brightness %.0f%%", state * 100);
+          if (state == 0) {
+            id(disp).filled_circle(320, 320, 232, Color::BLACK);
+            id(disp).update();
+          }
+
+light:
+  - platform: monochromatic
+    id: display_brightness
+    output: panel_brightness
+    default_transition_length: 0s
+    restore_mode: ALWAYS_ON
+
+binary_sensor:
+  - { platform: sdl, id: btn_boot, key: SDLK_b }
+  - { platform: sdl, id: btn_pwr, key: SDLK_p }

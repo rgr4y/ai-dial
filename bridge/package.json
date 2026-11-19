@@ -8,15 +8,13 @@
   "scripts": {
     "start": "node dial-bridge.mjs",
     "test": "node --test",
-    "dev": "vite sim",
-    "bridge": "node dial-bridge.mjs"
+    "bridge": "node dial-bridge.mjs",
+    "sim": "cd .. && esphome run claude-buddy-sim.yaml"
   },
   "dependencies": {
-    "@2colors/esphome-native-api": "1.3.7",
-    "ws": "^8.23.0"
+    "@2colors/esphome-native-api": "1.3.7"
   },
   "devDependencies": {
-    "pngjs": "^7.0.0",
-    "vite": "^6.4.6"
+    "pngjs": "^7.0.0"
   }
 }
