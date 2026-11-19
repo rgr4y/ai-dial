@@ -6,6 +6,7 @@
 # The bridge drives it like the dial over the native API on 127.0.0.1:6053: add 127.0.0.1 to DIAL_HOST.
 # Pets load straight from bridge/assets ($DIAL_ASSETS overrides), no LittleFS or sync.
 # Mouse = touch. PWR / BOOT: click the keys on the case edge, or press p / b with the window focused.
+# Battery stand-in (no PMU here): [ / ] = battery -10 / +10 %, u = toggle USB power.
 
 substitutions:
   name: claude-buddy-sim
@@ -60,6 +61,12 @@ esphome:
                 }
               return 0;
             }, nullptr);
+    # The dial sets these from the PMU in claude-buddy.yaml (same priority, after buddy-ui.yaml's init).
+    - priority: -150
+      then:
+        - lambda: |-
+            buddyui::ui().battery = []() { return id(sim_bat); };
+            buddyui::ui().on_usb = []() { return id(sim_usb); };
     - priority: -200
       then:
         - lambda: |-
@@ -67,6 +74,9 @@ esphome:
             // state and skip its triggers. The dial's GPIO keys publish theirs in setup.
             id(btn_pwr).publish_initial_state(false);
             id(btn_boot).publish_initial_state(false);
+            id(btn_bat_dn).publish_initial_state(false);
+            id(btn_bat_up).publish_initial_state(false);
+            id(btn_usb).publish_initial_state(false);
             using namespace sim_keys;
             auto ring = [](int size, int width, uint32_t color) {
               lv_obj_t *o = lv_obj_create(lv_layer_top());
@@ -171,6 +181,32 @@ light:
     default_transition_length: 0s
     restore_mode: ALWAYS_ON
 
+globals:
+  - { id: sim_bat, type: int, initial_value: "80" }
+  - { id: sim_usb, type: bool, initial_value: "false" }
+
 binary_sensor:
   - { platform: sdl, id: btn_boot, key: SDLK_b }
   - { platform: sdl, id: btn_pwr, key: SDLK_p }
+  - platform: sdl
+    id: btn_bat_dn
+    key: SDLK_LEFTBRACKET
+    on_press:
+      - lambda: |-
+          id(sim_bat) = std::max(0, id(sim_bat) - 10);
+          ESP_LOGI("sim", "battery %d%% usb %d", id(sim_bat), id(sim_usb));
+  - platform: sdl
+    id: btn_bat_up
+    key: SDLK_RIGHTBRACKET
+    on_press:
+      - lambda: |-
+          id(sim_bat) = std::min(100, id(sim_bat) + 10);
+          ESP_LOGI("sim", "battery %d%% usb %d", id(sim_bat), id(sim_usb));
+  - platform: sdl
+    id: btn_usb
+    key: SDLK_u
+    on_press:
+      - lambda: |-
+          id(sim_usb) = !id(sim_usb);
+          ESP_LOGI("sim", "battery %d%% usb %d", id(sim_bat), id(sim_usb));
+
