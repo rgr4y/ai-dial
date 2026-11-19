@@ -5,27 +5,14 @@
 //   layer i (0 = back) shows frames[loop[step]] at origin + at[step]; discs at origin + (cx, cy) / 16
 // An "attached" scene (the alert bubble) has no body layer and borrows the origin of the scene it sits on (focus.c:961).
 // Pure maths is host-testable with -DSCENE_NO_LVGL (tests/test_buddy.cpp).
-#include <algorithm>
 #include <array>
 #include <cstdint>
-#include <cstdlib>
-#include <cstring>
 #include <string>
 #include <vector>
 
 #ifdef SCENE_NO_LVGL
-// Host stub: the fields flatten() touches, same names as LVGL's.
-struct lv_image_dsc_t {
-  struct { uint32_t magic, cf, flags, w, h, stride; } header;
-  uint32_t data_size;
-  const uint8_t *data;
-};
+struct lv_image_dsc_t { int w, h; };
 typedef struct _lv_obj_t lv_obj_t;
-#define LV_IMAGE_HEADER_MAGIC 0x19
-#define LV_COLOR_FORMAT_RGB565A8 0x14
-#define heap_caps_malloc(n, caps) malloc(n)
-#define heap_caps_free(p) free(p)
-#define MALLOC_CAP_SPIRAM 0
 #else
 #include <lvgl.h>
 #endif
@@ -65,74 +52,6 @@ inline Pt origin(const Scene &s, int bias) { return {((W - s.w) >> 1) + s.dx, C 
 inline Pt layer_pos(const Scene &s, const Scene &base, int bias, size_t i, uint8_t k) {
   Pt o = origin(base, bias);
   return {o.x + s.layers[i].at[k][0], o.y + s.layers[i].at[k][1]};
-}
-
-// Composite every layer of every step into one RGB565A8 image per step (PSRAM), so playing it is one blit per step.
-// The flat scene keeps w/h/dx/dy, so its single layer sits at origin + (bx0, by0) where the layers' union box was.
-// The images are never freed (the pack changes only across a reboot). nullptr on allocation failure, nothing leaked.
-inline Scene *flatten(const Scene &s) {
-  int bx0 = 32767, by0 = 32767, bx1 = -32768, by1 = -32768;
-  for (const Layer &l : s.layers)
-    for (int k = 0; k < s.steps; k++) {
-      const lv_image_dsc_t *f = l.frames[l.loop[k]];
-      bx0 = std::min(bx0, (int) l.at[k][0]); by0 = std::min(by0, (int) l.at[k][1]);
-      bx1 = std::max(bx1, l.at[k][0] + (int) f->header.w); by1 = std::max(by1, l.at[k][1] + (int) f->header.h);
-    }
-  if (bx1 <= bx0 || by1 <= by0) return nullptr;
-  const int bw = bx1 - bx0, bh = by1 - by0;
-  const size_t n = (size_t) bw * bh;
-  Scene *out = new Scene(s);
-  Layer flat;
-  for (int k = 0; k < s.steps; k++) {
-    auto *d = (lv_image_dsc_t *) heap_caps_malloc(sizeof(lv_image_dsc_t) + n * 3, MALLOC_CAP_SPIRAM);
-    if (!d) {
-      for (auto *f : flat.frames) heap_caps_free((void *) f);
-      delete out;
-#ifndef SCENE_NO_LVGL
-      ESP_LOGW("buddyui", "flatten %s: out of PSRAM at step %d", s.name.c_str(), k);
-#endif
-      return nullptr;
-    }
-    auto *px = (uint8_t *) (d + 1);
-    memset(px, 0, n * 3);
-    memset(d, 0, sizeof(*d));
-    d->header.magic = LV_IMAGE_HEADER_MAGIC;
-    d->header.cf = LV_COLOR_FORMAT_RGB565A8;
-    d->header.w = bw;
-    d->header.h = bh;
-    d->header.stride = bw * 2;
-    d->data_size = n * 3;
-    d->data = px;
-    uint8_t *dst_a = px + n * 2;
-    for (const Layer &l : s.layers) {
-      const lv_image_dsc_t *f = l.frames[l.loop[k]];
-      const int fw = f->header.w, fh = f->header.h, ox = l.at[k][0] - bx0, oy = l.at[k][1] - by0;
-      const uint8_t *sa = f->data + (size_t) fw * fh * 2;
-      for (int y = 0; y < fh; y++)
-        for (int x = 0; x < fw; x++) {
-          uint8_t a_s = sa[y * fw + x];
-          if (!a_s) continue;
-          uint16_t sc, *dc = (uint16_t *) px + (size_t) (oy + y) * bw + ox + x;
-          memcpy(&sc, f->data + ((size_t) y * fw + x) * 2, 2);
-          uint8_t &da = dst_a[(size_t) (oy + y) * bw + ox + x];
-          if (a_s == 255) {
-            *dc = sc; da = 255; continue;
-          }
-          int a_d = da, a_o = a_s + a_d * (255 - a_s) / 255;  // a_o >= a_s > 0
-          auto mix = [&](int sh, int mask) {
-            int cs = (sc >> sh) & mask, cd = (*dc >> sh) & mask;
-            return (cs * a_s + cd * a_d * (255 - a_s) / 255) / a_o;
-          };
-          *dc = (uint16_t) (mix(11, 31) << 11 | mix(5, 63) << 5 | mix(0, 31));
-          da = (uint8_t) a_o;
-        }
-    }
-    flat.frames.push_back(d);
-    flat.loop.push_back(k);
-    flat.at.push_back({(int16_t) bx0, (int16_t) by0});
-  }
-  out->layers = {flat};
-  return out;
 }
 
 #ifndef SCENE_NO_LVGL
