@@ -125,31 +125,6 @@ inline bool mount() {
 }
 #endif
 
-// LVGL RLE on 2-byte blocks (libs/rle/lv_rle.c); bounds-checked against both buffers.
-inline bool unrle(const uint8_t *in, size_t in_len, uint8_t *out, size_t out_len) {
-  size_t r = 0, w = 0;
-  while (r < in_len && w < out_len) {
-    uint8_t c = in[r++];
-    if (c & 0x80) {
-      size_t b = (c & 0x7f) * 2;
-      if (r + b > in_len) return false;
-      size_t keep = std::min(b, out_len - w);
-      memcpy(out + w, in + r, keep);
-      r += b;
-      w += keep;
-    } else {
-      if (r + 2 > in_len) return false;
-      for (uint8_t k = 0; k < c && w < out_len; k++) {
-        size_t keep = std::min<size_t>(2, out_len - w);
-        memcpy(out + w, in + r, keep);
-        w += keep;
-      }
-      r += 2;
-    }
-  }
-  return w == out_len;
-}
-
 // One frame file (lv_image_header_t + lv_image_compressed_t header + RLE body) -> an uncompressed RGB565A8
 // lv_image_dsc_t in PSRAM. Never freed: packs only change across a reboot.
 inline const lv_image_dsc_t *load_frame(const std::string &path) {
@@ -165,7 +140,7 @@ inline const lv_image_dsc_t *load_frame(const std::string &path) {
   auto *d = (lv_image_dsc_t *) heap_caps_malloc(sizeof(lv_image_dsc_t) + dlen, MALLOC_CAP_SPIRAM);
   if (!d) return nullptr;
   auto *px = (uint8_t *) (d + 1);
-  if (!unrle((const uint8_t *) f.data() + 24, clen, px, dlen)) {
+  if (lv_rle_decompress((const uint8_t *) f.data() + 24, clen, px, dlen, 2) != dlen) {
     heap_caps_free(d);
     return nullptr;
   }

@@ -54,7 +54,7 @@ export function rle(raw) {
   out.push(Buffer.from([0x81]), buf.subarray(last * BLK));
   return Buffer.concat(out);
 }
-// Same decoder as the dial's (buddy/character.h unrle), for the round-trip check.
+// Mirrors LVGL lv_rle_decompress, for the round-trip check.
 export function unrle(src, outLen) {
   const out = Buffer.alloc(outLen + BLK);
   let r = 0, w = 0;

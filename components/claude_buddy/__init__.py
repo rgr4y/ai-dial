@@ -90,6 +90,7 @@ def _lvgl_defines(config):
 
         df.add_define("LV_USE_ARCLABEL")
         df.add_define("LV_USE_IMAGE")
+        df.add_define("LV_USE_RLE")  # character.h load_frame decodes pet frames with lv_rle_decompress
         df.add_define("LV_DRAW_SW_SUPPORT_A8")  # arclabel rotates A8 glyph bitmaps
         df.add_define("LV_DRAW_SW_SUPPORT_RGB565A8")
     return config
