@@ -252,6 +252,7 @@ inline void toggle_screen(uint32_t now) {
 }
 
 void update(uint32_t now);
+inline void tap(const std::string &t);
 
 // Splash entrance: the wordmark rises 24 px and fades in.
 // Bridge connected: BURST_N green sparks shoot from the centre to the bezel, shrinking and fading (700 ms).
@@ -364,46 +365,26 @@ inline void publish_state() {
 // ---- events ----
 inline void on_root(lv_event_t *e) {
   Ui &u = ui();
-  uint32_t now = lv_tick_get();
-  activity(now);
   lv_event_code_t code = lv_event_get_code(e);
-  if (code == LV_EVENT_LONG_PRESSED && u.view == View::FACE) {
-    // Face hold (was tabs, 650 ms, fires while still held): recent entries + stats.
-    u.entries_open = true;
-    u.entries_at = now;
+  bool closable = u.view == View::ENTRIES || u.view == View::USAGE;
+  const char *t = nullptr;
+  if (code == LV_EVENT_LONG_PRESSED) {
+    t = "hold";  // face hold (650 ms, fires while still held): recent entries + stats
   } else if (code == LV_EVENT_GESTURE) {
-    lv_dir_t d = lv_indev_get_gesture_dir(lv_indev_active());
-    if (d == LV_DIR_RIGHT && u.view == View::PERMISSION && u.buddy->has_prompt())
-      u.deferred_id = u.buddy->snap().prompt_id;  // swipe right = back = "later" (spec §3)
-    else if (u.view == View::ENTRIES)
-      u.entries_open = false;
-    else if (u.view == View::USAGE)
-      u.usage_open = false;
-  } else if (code == LV_EVENT_SHORT_CLICKED && u.view == View::ENTRIES) {
-    u.entries_open = false;
-  } else if (code == LV_EVENT_SHORT_CLICKED && u.view == View::USAGE) {
-    u.usage_open = false;  // "Tap to close"
+    bool right = lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT;
+    if (right && u.view == View::PERMISSION && u.buddy->has_prompt()) t = "later";  // swipe right = back = "later" (spec §3)
+    else if (closable) t = "back";
+  } else if (code == LV_EVENT_SHORT_CLICKED && closable) {
+    t = "back";  // "Tap to close"
   }
+  if (t) return tap(t);
+  uint32_t now = lv_tick_get();  // PRESSED, or nothing to do: the touch still counts as activity
+  activity(now);
   update(now);
 }
-inline void on_card(lv_event_t *) {
-  Ui &u = ui();
-  if (u.view != View::FACE) return;
-  u.recap_cleared = u.buddy->last_text_ms();  // dismiss the recap: back to the relaxing face
-  pick_hint();
-  update(lv_tick_get());
-}
-inline void on_reopen(lv_event_t *) {  // the bell pill or alert bubble: open the put-off prompt again
-  ui().deferred_id.clear();
-  update(lv_tick_get());
-}
-inline void on_decide(lv_event_t *e) {
-  Ui &u = ui();
-  if (lv_event_get_target_obj(e) == u.btn_allow) u.buddy->approve();
-  else u.buddy->deny();
-  u.sent_at = lv_tick_get();
-  update(u.sent_at);
-}
+inline void on_card(lv_event_t *) { tap("card"); }
+inline void on_reopen(lv_event_t *) { tap("bell"); }  // the bell pill or alert bubble: open the put-off prompt again
+inline void on_decide(lv_event_t *e) { tap(lv_event_get_target_obj(e) == ui().btn_allow ? "allow" : "deny"); }
 
 // BOOT key: "later" on an open prompt, the usage screen from the face, back to the face from anything else.
 inline void boot(uint32_t now) {
