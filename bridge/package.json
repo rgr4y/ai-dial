@@ -8,7 +8,6 @@
   "scripts": {
     "start": "node dial-bridge.mjs",
     "test": "node --test",
-    "bridge": "node dial-bridge.mjs",
     "sim": "make -C .. sim"
   },
   "dependencies": {
