@@ -11,6 +11,7 @@
 #include <functional>
 #include <string>
 #include <strings.h>
+#include <utility>
 
 #include "character.h"
 #include "scene.h"
@@ -968,15 +969,7 @@ inline void tick(uint32_t now) {
 }
 
 // YAML hooks, polled from the 50 ms interval: take_wake() -> fade the panel in, take_sleep() -> fade it out.
-inline bool take_wake() {
-  bool w = ui().wake;
-  ui().wake = false;
-  return w;
-}
-inline bool take_sleep() {
-  bool z = ui().sleep;
-  ui().sleep = false;
-  return z;
-}
+inline bool take_wake() { return std::exchange(ui().wake, false); }
+inline bool take_sleep() { return std::exchange(ui().sleep, false); }
 
 }  // namespace buddyui
