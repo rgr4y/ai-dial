@@ -25,6 +25,8 @@ logger:
   logs:
     btn: DEBUG          # PWR / BOOT presses (buddy-ui.yaml)
 
+web_server:
+    ota: false
 esphome:
   on_boot:
     - priority: -100
@@ -73,6 +75,7 @@ ota:
       - lambda: buddyui::ota(4, 0, x);
     on_abort:
       - lambda: buddyui::ota(3, 0, 0);
+    encryption: 
 
 # ---- Audio: ES8311 DAC -> NS4150B amp. Speaker, mixer, resamplers and media player from docs/esp32-dial.yaml ----
 # (no mic, no boot stream). Mixer and resampler layout from esphome-touchs3/esphome-touch-s3.yaml.
