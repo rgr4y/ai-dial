@@ -11,8 +11,12 @@
 #include <functional>
 #include <string>
 
+#include "character.h"
 #include "scene.h"
+#include "esphome/core/defines.h"
+#ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
+#endif
 
 namespace buddyui {
 
@@ -27,6 +31,7 @@ static constexpr uint32_t TEXT = 0xefe7de, SECONDARY = 0xada6ad, ACCENT = 0xc6aa
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
 static constexpr uint32_t BOOT_AWAKE_MS = 60000; // never idle-sleep in the first minute after boot
 static constexpr uint32_t ENTRIES_MS = 15000;   // the entries view drops back to the face
+static constexpr uint32_t USAGE_SCREEN_MS = 30000;  // the usage screen (BOOT) drops back to the face
 static constexpr uint32_t SEND_MS = 2400;       // claude_send (posting a letter) after answering, one loop
 static constexpr uint32_t GERUND_MS = 6000;     // focus.c:760
 static constexpr uint32_t USAGE_EVERY_MS = 15000, USAGE_SHOW_MS = 3000;  // plan usage flashes on the lower arc
@@ -37,7 +42,7 @@ static constexpr int RECAP_MAX = 90;            // codepoints (focus.c:793)
 
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
-enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES };
+enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE };
 
 struct Ui {
   Fonts f{};
@@ -49,6 +54,7 @@ struct Ui {
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
   lv_obj_t *btn_deny = nullptr, *btn_allow = nullptr;
   lv_obj_t *list = nullptr, *list_text = nullptr;
+  lv_obj_t *usage = nullptr;  // usage screen: rebuilt from the snapshot's cards (build_usage)
   static constexpr int BURST_N = 18;
   lv_obj_t *burst[BURST_N] = {};     // bridge connected: green sparks fly out from the centre
   int16_t burst_r[BURST_N] = {};
@@ -58,6 +64,9 @@ struct Ui {
   View view = View::BRAND;
   bool entries_open = false;
   uint32_t entries_at = 0;
+  bool usage_open = false;
+  uint32_t usage_at = 0;
+  std::string usage_key;  // usages_key the usage screen was built from
   std::string deferred_id;            // prompt the user put off with "later": face + alert until it changes
   bool was_running = false;
   bool build = false;                 // cook or build, picked per 0 -> >0 edge (focus.c:219-231)
@@ -79,7 +88,7 @@ struct Ui {
   uint8_t shimmer_phase = 0;
   bool wake = false, sleep = false;   // one-shot requests for the YAML side (light fade)
   uint32_t small_t0 = 0;
-  const lv_image_dsc_t *const *small_set = nullptr;
+  const std::vector<const lv_image_dsc_t *> *small_set = nullptr;
 };
 
 inline Ui &ui() {
@@ -283,12 +292,12 @@ inline void splash_in() {
 }
 
 // ---- mirror: what is on the glass, as JSON (docs/DIAL-PROTOCOL.md "ui") ----
-// Published when it changes, on the buddy_ui text sensor (the bridge relays it to the simulator) and in the log.
+// Published when it changes, on the buddy_ui text sensor (the bridge reads the view from it) and in the log.
 inline void publish_state() {
   Ui &u = ui();
   auto vis = [](lv_obj_t *o) { return o && !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN); };
   auto hex = [](uint32_t c) { char b[8]; snprintf(b, sizeof(b), "#%06x", (unsigned) c); return std::string(b); };
-  static const char *const VIEWS[] = {"brand", "face", "permission", "entries"};
+  static const char *const VIEWS[] = {"brand", "face", "permission", "entries", "usage"};
   JsonDocument d;
   d["v"] = 1;
   d["view"] = VIEWS[(int) u.view];
@@ -297,12 +306,12 @@ inline void publish_state() {
   JsonObject st = d["status"].to<JsonObject>();
   st["text"] = u.arc_txt[1];
   st["color"] = hex(u.arc_col[1]);
-  if (u.shimmer) st["shimmer"] = true;  // the simulator runs the same sweep (terminal.c timing)
+  if (u.shimmer) st["shimmer"] = true;
   if (u.scene.sc) d["scene"] = u.scene.sc->name;
   if (u.alert.sc) d["alert"] = lv_label_get_text(u.alert.count);
   if (vis(u.card)) {
     d["card"] = lv_label_get_text(u.card_text);
-    d["small"] = u.small_set == pets::SMALL_Z6 ? 6 : 4;
+    d["small"] = u.small_set == &character::pack().small.z6 ? 6 : 4;
   }
   if (vis(u.bell)) d["bell"] = lv_label_get_text(u.bell_text);
   if (vis(u.word)) d["word"] = lv_label_get_text(u.word);
@@ -314,6 +323,20 @@ inline void publish_state() {
     p["count"] = lv_label_get_text(u.perm_count);
   }
   if (vis(u.list)) d["list"] = lv_label_get_text(u.list_text);
+  if (vis(u.usage)) {
+    JsonArray cards = d["usage"].to<JsonArray>();
+    for (const auto &c : u.buddy->snap().usages) {
+      JsonObject o = cards.add<JsonObject>();
+      o["n"] = c.name;
+      JsonArray ws = o["w"].to<JsonArray>();
+      for (const auto &w : c.w) {
+        JsonArray r = ws.add<JsonArray>();
+        r.add(w.label);
+        r.add(w.pct);
+        r.add(w.reset);
+      }
+    }
+  }
   if (vis(u.alarm)) d["alarm"] = lv_label_get_text(u.alarm);  // pulse runs on the receiver clock (usage window)
   std::string out;
   serializeJson(d, out);
@@ -339,8 +362,12 @@ inline void on_root(lv_event_t *e) {
       u.deferred_id = u.buddy->snap().prompt_id;  // swipe right = back = "later" (spec §3)
     else if (u.view == View::ENTRIES)
       u.entries_open = false;
+    else if (u.view == View::USAGE)
+      u.usage_open = false;
   } else if (code == LV_EVENT_SHORT_CLICKED && u.view == View::ENTRIES) {
     u.entries_open = false;
+  } else if (code == LV_EVENT_SHORT_CLICKED && u.view == View::USAGE) {
+    u.usage_open = false;  // "Tap to close"
   }
   update(now);
 }
@@ -363,13 +390,32 @@ inline void on_decide(lv_event_t *e) {
   update(u.sent_at);
 }
 
-// Remote tap from the simulator (api action buddy_tap): the same effect as touching the glass.
-// targets: allow, deny, later, card, bell, hold, back, wake, screen
+// BOOT key: "later" on an open prompt, the usage screen from the face, back to the face from anything else.
+inline void boot(uint32_t now) {
+  Ui &u = ui();
+  bool was_asleep = u.asleep;
+  activity(now);
+  if (was_asleep) return update(now);
+  if (u.view == View::PERMISSION && u.buddy->has_prompt()) {
+    u.deferred_id = u.buddy->snap().prompt_id;
+  } else if (u.view == View::FACE) {
+    u.usage_open = true;
+    u.usage_at = now;
+  } else {
+    u.entries_open = false;
+    u.usage_open = false;
+  }
+  update(now);
+}
+
+// Remote tap (api action buddy_tap): the same effect as touching the glass.
+// targets: allow, deny, later, card, bell, hold, back, wake, screen, boot
 inline void tap(const std::string &t) {
   Ui &u = ui();
   uint32_t now = lv_tick_get();
   bool was_asleep = u.asleep;
   activity(now);
+  if (t == "boot") return boot(now);
   if (t == "screen") toggle_screen(now);
   if (was_asleep || t == "wake" || t == "screen") return update(now);  // a wake touch only wakes
   if ((t == "allow" || t == "deny") && u.view == View::PERMISSION) {
@@ -388,6 +434,7 @@ inline void tap(const std::string &t) {
     u.entries_at = now;
   } else if (t == "back") {
     u.entries_open = false;
+    u.usage_open = false;
   }
   update(now);
 }
@@ -500,6 +547,13 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_align(u.list_text, LV_ALIGN_TOP_MID, 0, 96);
   lv_obj_add_flag(u.list_text, LV_OBJ_FLAG_EVENT_BUBBLE);
 
+  // Usage screen (BOOT): children made by build_usage().
+  u.usage = lv_obj_create(root);
+  lv_obj_remove_style_all(u.usage);
+  lv_obj_set_size(u.usage, scene::W, scene::W);
+  lv_obj_add_flag(u.usage, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_add_flag(u.usage, LV_OBJ_FLAG_HIDDEN);
+
   // Arcs last so they draw on top.
   u.name_arc = mk_arc(root, u.f.f26m, true);
   u.status_arc = mk_arc(root, u.f.f26m, false);
@@ -522,12 +576,17 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
 // Small pet above a card, centred between the name's foot (y 66) and the card top (focus.c:925-944).
 inline void place_small(int card_top, bool big, uint32_t now) {
   Ui &u = ui();
-  u.small_set = big ? pets::SMALL_Z6 : pets::SMALL_Z4;
+  const scene::Small &sm = character::pack().small;
+  u.small_set = big ? &sm.z6 : &sm.z4;
+  if (u.small_set->empty() || sm.loop.empty()) {  // no pack on flash yet
+    show(u.small, false);
+    return;
+  }
   if (!u.small_was) u.small_t0 = now;
   u.small_was = true;
   show(u.small, true);
-  const int8_t *st = pets::SMALL_LOOP[((now - u.small_t0) / pets::SMALL_STEP_MS) % pets::SMALL_STEPS];
-  const lv_image_dsc_t *img = u.small_set[st[0]];
+  const auto &st = sm.loop[((now - u.small_t0) / sm.step_ms) % sm.loop.size()];
+  const lv_image_dsc_t *img = (*u.small_set)[std::min<size_t>(st[0], u.small_set->size() - 1)];
   lv_image_set_src(u.small, img);
   int z = big ? 6 : 4;
   lv_obj_set_pos(u.small, (scene::W - (int) img->header.w) / 2,
@@ -556,6 +615,68 @@ inline void show_card(const std::string &text, uint32_t now) {
   place_small(top, lines <= 3, now);
 }
 
+// Usage screen layout: per provider its name, then a row per rate window: label,
+// bar (grows in over 500 ms), percent, time to reset. Block centred vertically.
+inline uint32_t usage_ink(uint32_t pct) { return pct >= 95 ? USAGE_HOT : pct >= 80 ? USAGE_WARN : RECAP; }
+inline void build_usage() {
+  Ui &u = ui();
+  const auto &cards = u.buddy->snap().usages;
+  lv_obj_clean(u.usage);
+  auto label = [&](const lv_font_t *f, uint32_t ink, const std::string &t, int x, int cy, int w, lv_text_align_t al) {
+    lv_obj_t *l = mk_label(u.usage, f, ink);
+    lv_label_set_text(l, t.c_str());
+    lv_label_set_long_mode(l, LV_LABEL_LONG_MODE_CLIP);
+    lv_obj_set_width(l, w);
+    lv_obj_set_style_text_align(l, al, 0);
+    lv_obj_set_pos(l, x, cy - lv_font_get_line_height(f) / 2);
+    lv_obj_add_flag(l, LV_OBJ_FLAG_EVENT_BUBBLE);
+  };
+  auto bar = [&](int x, int cy, int w, uint32_t col) {
+    lv_obj_t *b = lv_obj_create(u.usage);
+    lv_obj_remove_style_all(b);
+    lv_obj_set_size(b, w, 10);
+    lv_obj_set_pos(b, x, cy - 5);
+    lv_obj_set_style_radius(b, 5, 0);
+    lv_obj_set_style_bg_color(b, lv_color_hex(col), 0);
+    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+    lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
+    return b;
+  };
+  if (cards.empty()) {
+    label(u.f.f25, SECONDARY, "Loading usage\xE2\x80\xA6", 0, scene::C, scene::W, LV_TEXT_ALIGN_CENTER);
+    return;
+  }
+  constexpr int NAME_H = 36, ROW = 32, GAP = 18, X = 78, BX = 156, BW = 136;
+  int total = GAP * ((int) cards.size() - 1);
+  for (const auto &c : cards) total += NAME_H + ROW * (int) c.w.size();
+  int y = scene::C - total / 2 + 6;
+  for (const auto &c : cards) {
+    label(u.f.f26m, TEXT, c.name, X, y + NAME_H / 2, 300, LV_TEXT_ALIGN_LEFT);
+    y += NAME_H;
+    for (const auto &w : c.w) {
+      int cy = y + ROW / 2;
+      uint32_t ink = usage_ink(w.pct);
+      label(u.f.f20, RELAX_LINE, w.label, X, cy, 72, LV_TEXT_ALIGN_LEFT);
+      bar(BX, cy, BW, 0x2a2c34);
+      lv_obj_t *fill = bar(BX, cy, 10, ink);
+      lv_anim_t a;
+      lv_anim_init(&a);
+      lv_anim_set_var(&a, fill);
+      lv_anim_set_values(&a, 10, std::max<int>(10, BW * (int) std::min<uint32_t>(w.pct, 100) / 100));
+      lv_anim_set_duration(&a, 500);
+      lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+      lv_anim_set_exec_cb(&a, [](void *o, int32_t v) { lv_obj_set_width((lv_obj_t *) o, v); });
+      lv_anim_start(&a);
+      char pct[8];
+      snprintf(pct, sizeof(pct), "%u%%", (unsigned) w.pct);
+      label(u.f.f20, ink, pct, 352 - 64, cy, 64, LV_TEXT_ALIGN_RIGHT);
+      label(u.f.f20, 0x7a7a86, w.reset, 360, cy, 62, LV_TEXT_ALIGN_RIGHT);
+      y += ROW;
+    }
+    y += GAP;
+  }
+}
+
 // ---- state -> screen ----
 inline void update(uint32_t now) {
   Ui &u = ui();
@@ -563,6 +684,7 @@ inline void update(uint32_t now) {
   ClaudeBuddy *b = u.buddy;
   const auto &s = b->snap();
   bool live = b->live();
+  character::want(s.assets_url, s.assets_rev);
 
   // Work edge: new stopwatch, new cook/build pick, and the old recap goes (spec §2.4: cleared on turn start).
   bool running = live && s.running > 0;
@@ -578,16 +700,18 @@ inline void update(uint32_t now) {
   u.was_running = running;
   if (u.deferred_id != s.prompt_id && !s.prompt_id.empty()) u.deferred_id.clear();
   if (u.entries_open && now - u.entries_at > ENTRIES_MS) u.entries_open = false;
+  if (u.usage_open && now - u.usage_at > USAGE_SCREEN_MS) u.usage_open = false;
 
   View v = !live                                        ? View::BRAND
            : b->has_prompt() && u.deferred_id.empty()   ? View::PERMISSION
+           : u.usage_open                               ? View::USAGE
            : u.entries_open                             ? View::ENTRIES
                                                         : View::FACE;
   if (v == View::PERMISSION && u.view != View::PERMISSION) activity(now);  // a new question wakes the dial
   if (v == View::FACE && u.view != View::FACE) pick_hint();
   bool entered = v != u.view;
   if (entered) {
-    static const char *const NAMES[] = {"brand", "face", "permission", "entries"};
+    static const char *const NAMES[] = {"brand", "face", "permission", "entries", "usage"};
     ESP_LOGI("buddyui", "view %s (running %u, waiting %u)", NAMES[(int) v], (unsigned) s.running, (unsigned) s.waiting);
   }
   if (entered && u.view == View::BRAND) burst();  // the bridge just connected
@@ -598,15 +722,15 @@ inline void update(uint32_t now) {
   // Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
   struct Vis {
     Ui &u;
-    lv_obj_t *o[8];
-    bool want[8] = {};
-    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm} {}
+    lv_obj_t *o[9];
+    bool want[9] = {};
+    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage} {}
     void on(lv_obj_t *x) {
-      for (int i = 0; i < 8; i++)
+      for (int i = 0; i < 9; i++)
         if (o[i] == x) want[i] = true;
     }
     ~Vis() {
-      for (int i = 0; i < 8; i++) show(o[i], want[i]);
+      for (int i = 0; i < 9; i++) show(o[i], want[i]);
       u.small_was = want[0];
       publish_state();
     }
@@ -620,9 +744,13 @@ inline void update(uint32_t now) {
     // tried: too busy, and its redraws cost frame rate.)
     if (entered) splash_in();
     u.alert.stop();
-    u.scene.play(&pets::CLAUDE_RELAX, now, SPLASH_BIAS);
+    u.scene.play(character::find("relax"), now, SPLASH_BIAS);
     vis.on(u.word);
+#ifdef USE_WIFI
     bool wifi = esphome::wifi::global_wifi_component && esphome::wifi::global_wifi_component->is_connected();
+#else
+    bool wifi = true;  // host sim: the network is the Mac's
+#endif
     arc_text(u.name_arc, "", NAME);
     arc_text(u.status_arc, !wifi ? "Connecting to Wi-Fi" : u.was_live ? "Bridge offline" : "Looking for the bridge",
              SECONDARY, true);
@@ -642,6 +770,19 @@ inline void update(uint32_t now) {
     if (s.waiting > 1) snprintf(buf, sizeof(buf), "1 of %u waiting", (unsigned) s.waiting);
     set_text(u.perm_count, buf);
     arc_text(u.status_arc, "swipe right for later", RELAX_LINE);
+    return;
+  }
+
+  if (v == View::USAGE) {
+    u.scene.stop();
+    u.alert.stop();
+    vis.on(u.usage);
+    if (entered || u.usage_key != s.usages_key) {
+      u.usage_key = s.usages_key;
+      build_usage();
+    }
+    arc_text(u.name_arc, "Usage", NAME);
+    arc_text(u.status_arc, "Tap to close", RELAX_LINE);
     return;
   }
 
@@ -666,14 +807,14 @@ inline void update(uint32_t now) {
   bool waiting = s.waiting > 0;  // only reachable here once the prompt was put off
   if (sending) {
     u.alert.stop();
-    u.scene.play(&pets::CLAUDE_SEND, now, 0);  // voice face bias 0 (focus.c:670)
+    u.scene.play(character::find("send"), now, 0);  // voice face bias 0 (focus.c:670)
     arc_text(u.status_arc, "Sent", RELAX_LINE);
   } else if (running) {
-    const scene::Scene *sc = u.build ? &pets::CLAUDE_BUILD : &pets::CLAUDE_WORK;
+    const scene::Scene *sc = u.build ? character::find("build") : character::find("work");
     u.scene.play(sc, now, 4);
     if (waiting) {
       // Alert bubble on the working face, count = waiting prompts (spec §4: semantic shift from "other agents").
-      u.alert.play(&pets::CLAUDE_ALERT, now, 4, sc, true);
+      u.alert.play(character::find("alert"), now, 4, sc, true);
       char n[4];
       if (s.waiting > 9) snprintf(n, sizeof(n), "9+");
       else snprintf(n, sizeof(n), "%u", (unsigned) s.waiting);
@@ -698,7 +839,7 @@ inline void update(uint32_t now) {
     arc_text(u.status_arc, "", RELAX_LINE);
   } else {
     u.alert.stop();
-    u.scene.play(&pets::CLAUDE_RELAX, now, 4);
+    u.scene.play(character::find("relax"), now, 4);
     arc_text(u.status_arc, waiting ? "" : u.hint, RELAX_LINE);  // hint left out while the bell shows
   }
   // Plan usage: 3 s of every 15 s on the lower arc, over whatever the face shows there (Harness's display carries
@@ -795,7 +936,7 @@ inline void tick(uint32_t now) {
   }
   if (!u.asleep && !lv_obj_has_flag(u.small, LV_OBJ_FLAG_HIDDEN) && u.small_set) {
     lv_obj_update_layout(u.card);
-    place_small(lv_obj_get_y(u.card), u.small_set == pets::SMALL_Z6, now);
+    place_small(lv_obj_get_y(u.card), u.small_set == &character::pack().small.z6, now);
   }
   static uint8_t in_usage = 0;  // start/end the usage and battery flashes on time, not on the next 1 s update
   uint8_t w = (uint8_t) std::min<uint32_t>(now % USAGE_EVERY_MS / USAGE_SHOW_MS, 2);

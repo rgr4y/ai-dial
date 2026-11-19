@@ -31,7 +31,48 @@ CONFIG_SCHEMA = cv.Schema(
 ).extend(cv.COMPONENT_SCHEMA)
 
 
+def _gen_character_pack():
+    # Every compile/run: rebuild bridge/assets/claude from docs/harness-pets. Unchanged art = same rev, no files
+    # touched; changed art = new rev, and the dial pulls it from the bridge on its next heartbeat.
+    import logging
+    import shutil
+    import subprocess
+
+    from esphome.core import CORE
+
+    log = logging.getLogger(__name__)
+    script = CORE.relative_config_path("scripts", "gen_buddy_pets.mjs")
+    node = shutil.which("node")
+    if not node:
+        log.warning("node not on PATH: character pack not regenerated (%s)", script)
+        return
+    r = subprocess.run([node, script], capture_output=True, text=True, check=False)
+    for line in (r.stdout + r.stderr).strip().splitlines():
+        (log.info if r.returncode == 0 else log.error)("gen_buddy_pets: %s", line)
+    if r.returncode != 0:
+        raise cv.Invalid(f"gen_buddy_pets.mjs failed (exit {r.returncode})")
+
+
 async def to_code(config):
+    _gen_character_pack()
+    from esphome.core import CORE
+
+    if CORE.is_esp32:
+        # buddy/character.h: character packs on the `storage` LittleFS partition, pulled from the bridge over HTTP.
+        # (Host sim reads bridge/assets directly.)
+        from esphome.components.esp32 import (
+            add_idf_component,
+            add_idf_sdkconfig_option,
+            request_http_client,
+            require_vfs_dir,
+        )
+
+        add_idf_component(name="joltwallet/littlefs", ref="1.23.1")
+        # LittleFS file/cache buffers in PSRAM: internal heap is tight once Wi-Fi, LVGL and the API are up.
+        add_idf_sdkconfig_option("CONFIG_LITTLEFS_MALLOC_STRATEGY_DEFAULT", False)
+        add_idf_sdkconfig_option("CONFIG_LITTLEFS_MALLOC_STRATEGY_SPIRAM_PREFER", True)
+        request_http_client()
+        require_vfs_dir()  # mkdir/stat/rename/unlink; ESPHome turns VFS dir support off by default (ENOENT)
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     if CONF_DECISION_SENSOR in config:

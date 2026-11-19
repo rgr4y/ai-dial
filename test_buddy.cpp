@@ -8,9 +8,12 @@ using namespace scene;
 
 int main() {
   // claude_work: 117x117, dx 1, dy -4, 26 steps x 55 ms (pets.c:66).
-  static const int8_t dy[26] = {0, -1, -1, -1, -1, -1};
-  static const int16_t at[26][2] = {{114, 43}};
-  Scene work{"claude_work", 117, 117, 1, -4, 26, 55, nullptr, nullptr, dy, nullptr, nullptr, at, 0, nullptr, nullptr};
+  Scene work;
+  work.name = "claude_work";
+  work.w = work.h = 117; work.dx = 1; work.dy = -4; work.steps = 26; work.step_ms = 55;
+  work.step_dy = {0, -1, -1, -1, -1, -1};
+  work.step_dy.resize(26);
+  work.ov_at = {{114, 43}};
 
   // origin = ((466-117)>>1)+1, 233-(117>>1)+4-4 = (175, 175)
   Pt o = origin(work, 4);
@@ -21,8 +24,10 @@ int main() {
   assert(ov_pos(work, work, 4, 0).x == 175 + 114 && ov_pos(work, work, 4, 0).y == 175 + 43);
 
   // An attached scene (alert, w = h = 0) uses its base's origin, not its own.
-  static const int16_t aat[1][2] = {{-31, -21}};
-  Scene alert{"claude_alert", 0, 0, 0, 0, 1, 110, nullptr, nullptr, nullptr, nullptr, nullptr, aat, 0, nullptr, nullptr};
+  Scene alert;
+  alert.name = "claude_alert";
+  alert.step_ms = 110;
+  alert.ov_at = {{-31, -21}};
   assert(ov_pos(alert, work, 4, 0).x == 175 - 31 && ov_pos(alert, work, 4, 0).y == 175 - 21);
 
   puts("scene ok");

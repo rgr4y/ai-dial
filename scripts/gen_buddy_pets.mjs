@@ -14,7 +14,7 @@
 //                              overlay frame + offset, juggling discs, alert count position) and the small pet's loop.
 //                              buddy/scene.h plays them with the same maths as focus.c (origin, step, overlay).
 import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -90,15 +90,13 @@ function frameFile(w, h, raw) {
   return Buffer.concat([head, body]);
 }
 
-rmSync(OUT, { recursive: true, force: true });
-const files = {}, sets = {};
+const files = {}, sets = {}, blobs = {};  // blobs: path -> bytes, written only if the rev changed
 let rawBytes = 0, packedBytes = 0;
 
 // Write one frame set once; return its name.
 function frames(fr, name) {
   name ??= fr.dir.split('/').at(-1);
   if (sets[name]) return name;
-  mkdirSync(join(OUT, name), { recursive: true });
   sets[name] = [];
   for (let k = 0; k < fr.n; k++) {
     const { width: w, height: h, data: px } = PNG.sync.read(readFileSync(join(SRC, fr.dir, `${String(k).padStart(2, '0')}.png`)));
@@ -109,7 +107,7 @@ function frames(fr, name) {
       raw[n * 2 + i] = px[i * 4 + 3];
     }
     const file = frameFile(w, h, raw), path = `${name}/${k}.bin`;
-    writeFileSync(join(OUT, path), file);
+    blobs[path] = file;
     files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
     sets[name].push(path);
     rawBytes += raw.length;
@@ -149,6 +147,24 @@ const small = {
 };
 
 const rev = createHash('sha256').update(JSON.stringify([files, scenes, small])).digest('hex').slice(0, 16);
-writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ name: 'claude', rev, files, sets, scenes, small }));
+const manifest = JSON.stringify({ name: 'claude', rev, files, sets, scenes, small });
 console.log(`frames: ${rawBytes >> 10} KB raw, ${packedBytes >> 10} KB packed in ${Object.keys(files).length} files`);
-console.log(`wrote ${OUT}/manifest.json rev ${rev}`);
+let have = null;
+try { have = JSON.parse(readFileSync(join(OUT, 'manifest.json'), 'utf8')).rev; } catch {}
+if (have === rev) {
+  console.log(`${OUT} unchanged, rev ${rev}`);
+} else {
+  // Build next to OUT, then swap, so the bridge never serves a half-written pack.
+  const tmp = `${OUT}.tmp`, old = `${OUT}.old`;
+  rmSync(tmp, { recursive: true, force: true });
+  for (const [path, file] of Object.entries(blobs)) {
+    mkdirSync(dirname(join(tmp, path)), { recursive: true });
+    writeFileSync(join(tmp, path), file);
+  }
+  writeFileSync(join(tmp, 'manifest.json'), manifest);
+  rmSync(old, { recursive: true, force: true });
+  if (existsSync(OUT)) renameSync(OUT, old);
+  renameSync(tmp, OUT);
+  rmSync(old, { recursive: true, force: true });
+  console.log(`wrote ${OUT}/manifest.json rev ${rev} (was ${have ?? 'none'})`);
+}

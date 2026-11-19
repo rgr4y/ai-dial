@@ -1,16 +1,18 @@
 #pragma once
-// Plays a Harness pet scene (buddy/pets_claude.h) on LVGL widgets with focus.c's maths:
+// Plays a Harness pet scene (a character pack, buddy/character.h) on LVGL widgets with focus.c's maths:
 //   step   = (t / step_ms) % steps                                  (focus.c:356)
 //   origin = ((466 - w) / 2 + dx, 233 - h / 2 + bias + dy)          (focus.c:374)
 //   body at origin + (0, step_dy[step]); overlay at origin + ov_at[step]; discs at origin + (cx, cy) / 16
 // An "attached" scene (the alert bubble) has no body and borrows the origin of the scene it sits on (focus.c:961).
 // Pure maths is host-testable with -DSCENE_NO_LVGL (test_buddy.cpp).
+#include <array>
 #include <cstdint>
+#include <string>
+#include <vector>
 
 #ifdef SCENE_NO_LVGL
 struct lv_image_dsc_t { int w, h; };
 typedef struct _lv_obj_t lv_obj_t;
-#define LV_IMAGE_HEADER_MAGIC 0
 #else
 #include <lvgl.h>
 #endif
@@ -19,24 +21,28 @@ namespace scene {
 
 static constexpr int W = 466, C = 233;
 
-#ifdef SCENE_NO_LVGL
-struct Disc { int16_t cx16, cy16, r16; uint32_t rgb; };
+// Loaded at boot from the character pack on LittleFS (buddy/character.h). Empty vectors mean "none".
+struct Disc { int16_t cx16, cy16, r16; uint32_t rgb; };  // juggling ball: filled disc, 1/16 px
 struct Scene {
-  const char *name;
-  int16_t w, h, dx, dy;
-  uint8_t steps; uint16_t step_ms;
-  const lv_image_dsc_t *const *body; const uint8_t *loop; const int8_t *step_dy;
-  const lv_image_dsc_t *const *ov; const uint8_t *ov_loop; const int16_t (*ov_at)[2];
-  uint8_t discs; const Disc *disc;
-  const int16_t (*count_at)[2];
+  std::string name;
+  int16_t w = 0, h = 0, dx = 0, dy = 0;  // origin = ((466-w)/2+dx, 233-h/2+bias+dy)  (focus.c:374)
+  uint8_t steps = 1; uint16_t step_ms = 100;
+  std::vector<const lv_image_dsc_t *> body;  // empty for an attached scene (alert)
+  std::vector<uint8_t> loop;
+  std::vector<int8_t> step_dy;
+  std::vector<const lv_image_dsc_t *> ov;
+  std::vector<uint8_t> ov_loop;
+  std::vector<std::array<int16_t, 2>> ov_at;
+  uint8_t discs = 0;
+  std::vector<Disc> disc;                    // per step: discs entries
+  std::vector<std::array<int16_t, 2>> count_at;  // alert: where the waiting count goes
 };
-#else
-}  // namespace scene
-#include "pets_claude.h"
-namespace scene {
-using pets::Scene;
-using pets::Disc;
-#endif
+// Small pet above the recap card: zoom 6/8 and 4/8 frame sets, one (frame, dy) loop.
+struct Small {
+  std::vector<const lv_image_dsc_t *> z6, z4;
+  std::vector<std::array<int8_t, 2>> loop;
+  uint16_t step_ms = 100;
+};
 
 struct Pt { int x, y; };
 
@@ -44,7 +50,7 @@ inline uint8_t step_at(const Scene &s, uint32_t elapsed_ms) { return (elapsed_ms
 inline Pt origin(const Scene &s, int bias) { return {((W - s.w) >> 1) + s.dx, C - (s.h >> 1) + bias + s.dy}; }
 inline Pt body_pos(const Scene &s, int bias, uint8_t k) {
   Pt o = origin(s, bias);
-  return {o.x, o.y + (s.step_dy ? s.step_dy[k] : 0)};
+  return {o.x, o.y + (s.step_dy.empty() ? 0 : s.step_dy[k])};
 }
 // `base` is the scene whose origin an attached overlay uses; for normal scenes base == s.
 inline Pt ov_pos(const Scene &s, const Scene &base, int bias, uint8_t k) {
@@ -83,11 +89,16 @@ struct Player {
     stop();
   }
   // base: for an attached scene (alert), the scene it sits on.
+  // s == nullptr (no character loaded yet) shows nothing.
   void play(const Scene *s, uint32_t now, int bias_ = 4, const Scene *base_ = nullptr, bool once_ = false) {
+    if (!s) {
+      if (sc) stop();
+      return;
+    }
     if (s == sc && (!base_ || base_ == base))
       return;
     once = once_;
-    ESP_LOGI("buddyui", "scene %s", s->name);
+    ESP_LOGI("buddyui", "scene %s", s->name.c_str());
     sc = s;
     base = base_ ? base_ : s;
     bias = bias_;
@@ -95,14 +106,14 @@ struct Player {
     last = -1;
     lv_obj_remove_flag(body, LV_OBJ_FLAG_HIDDEN);
     lv_obj_remove_flag(ov, LV_OBJ_FLAG_HIDDEN);
-    if (!s->body)
+    if (s->body.empty())
       lv_obj_add_flag(body, LV_OBJ_FLAG_HIDDEN);
-    if (!s->ov)
+    if (s->ov.empty())
       lv_obj_add_flag(ov, LV_OBJ_FLAG_HIDDEN);
     for (int i = 0; i < 6; i++)
       (i < s->discs ? lv_obj_remove_flag : lv_obj_add_flag)(disc[i], LV_OBJ_FLAG_HIDDEN);
     if (count)
-      (s->count_at ? lv_obj_remove_flag : lv_obj_add_flag)(count, LV_OBJ_FLAG_HIDDEN);
+      (!s->count_at.empty() ? lv_obj_remove_flag : lv_obj_add_flag)(count, LV_OBJ_FLAG_HIDDEN);
     tick(now);
   }
   void stop() {
@@ -123,12 +134,12 @@ struct Player {
     if (k == last)
       return;
     last = k;
-    if (sc->body) {
+    if (!sc->body.empty()) {
       lv_image_set_src(body, sc->body[sc->loop[k]]);
       Pt p = body_pos(*sc, bias, k);
       lv_obj_set_pos(body, p.x, p.y);
     }
-    if (sc->ov) {
+    if (!sc->ov.empty()) {
       lv_image_set_src(ov, sc->ov[sc->ov_loop[k]]);
       Pt p = ov_pos(*sc, *base, bias, k);
       lv_obj_set_pos(ov, p.x, p.y);
@@ -142,8 +153,8 @@ struct Player {
       lv_obj_set_style_bg_color(disc[i], lv_color_hex(d.rgb), 0);
     }
     // The waiting count, centred on base origin + count_at; (0,0) means not shown this step (focus.c:965-976).
-    if (count && sc->count_at) {
-      const int16_t *ca = sc->count_at[k];
+    if (count && !sc->count_at.empty()) {
+      const auto &ca = sc->count_at[k];
       if (ca[0] || ca[1]) {
         lv_obj_remove_flag(count, LV_OBJ_FLAG_HIDDEN);
         lv_obj_update_layout(count);

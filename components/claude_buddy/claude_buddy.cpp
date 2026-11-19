@@ -58,6 +58,20 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     s.tokens_today = doc["tokens_today"] | (uint64_t) 0;
     s.usage = doc["usage"] | "";
     s.usage_pct = doc["usage_pct"] | 0u;
+    s.usages.clear();
+    s.usages_key.clear();
+    if (!doc["usages"].isNull()) {
+      serializeJson(doc["usages"], s.usages_key);
+      for (JsonObject c : doc["usages"].as<JsonArray>()) {
+        UsageCard uc;
+        uc.name = c["n"] | "";
+        for (JsonArray w : c["w"].as<JsonArray>())
+          uc.w.push_back({w[0] | "", w[1] | 0u, w[2] | ""});
+        s.usages.push_back(std::move(uc));
+      }
+    }
+    s.assets_url = doc["assets"]["url"] | "";
+    s.assets_rev = doc["assets"]["rev"] | "";
     JsonObject p = doc["prompt"];
     s.prompt_id = p ? (p["id"] | "") : "";
     if (!s.prompt_id.empty() && s.prompt_id == this->answered_id_)

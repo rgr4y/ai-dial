@@ -12,6 +12,17 @@
 
 namespace esphome::claude_buddy {
 
+// One provider on the usage screen: rate windows of (label, percent used, time to reset).
+struct UsageCard {
+  struct Win {
+    std::string label;
+    uint32_t pct;
+    std::string reset;
+  };
+  std::string name;
+  std::vector<Win> w;
+};
+
 struct Snapshot {
   uint32_t total = 0, running = 0, waiting = 0;
   std::string msg;
@@ -20,6 +31,9 @@ struct Snapshot {
   std::string prompt_id, prompt_tool, prompt_hint;  // prompt_id empty = no permission pending
   std::string usage;      // plan usage line from the bridge, e.g. "5h 15% · wk 19% · 2h 41m"
   uint32_t usage_pct = 0; // the higher of the 5-hour and weekly utilisation
+  std::vector<UsageCard> usages;  // only while the dial shows the usage screen (bridge sends it then)
+  std::string usages_key;         // usages as raw JSON: the UI rebuilds when it changes
+  std::string assets_url, assets_rev;  // character pack the bridge serves (buddy/character.h)
   uint32_t at_ms = 0;                               // millis() of the last heartbeat; 0 = never
 };
 
