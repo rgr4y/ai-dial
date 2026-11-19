@@ -47,8 +47,15 @@ def _gen_character_pack():
         log.warning("node not on PATH: character pack not regenerated (%s)", script)
         return
     r = subprocess.run([node, script], capture_output=True, text=True, check=False)
+    # Green (red on failure) so our lines stand out. Straight to the real stderr: under `| tee` (make flash/sim)
+    # ESPHome's colorama wrapper strips ANSI from everything that goes through logging.
+    import sys
+
+    level, col = ("INFO", "\033[1;32m") if r.returncode == 0 else ("ERROR", "\033[1;31m")
+    sys.stderr.flush()
     for line in (r.stdout + r.stderr).strip().splitlines():
-        (log.info if r.returncode == 0 else log.error)("gen_buddy_pets: %s", line)
+        sys.__stderr__.write(f"{col}{level} gen_buddy_pets: {line}\033[0m\n")
+    sys.__stderr__.flush()
     if r.returncode != 0:
         raise cv.Invalid(f"gen_buddy_pets.mjs failed (exit {r.returncode})")
 
