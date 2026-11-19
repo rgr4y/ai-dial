@@ -33,7 +33,7 @@ packages:
 
 # Dressing on the top layer (never touchable except the keys): case at true scale (55 mm case / 43.76 mm glass,
 # Waveshare size drawing), corners masked, glass edge ringed, PWR and BOOT on the right edge where the real
-# ones are (~1:30 and ~4 o'clock seen from the front). Clicking a key drives the same binary sensor as its hotkey.
+# ones are (~1:30 and ~4 o'clock seen from the front). Clicking a key drives the same binary sensor as its hotkey (hit-tested in touchscreen:).
 esphome:
   name: ${name}
   friendly_name: ${friendly_name}
@@ -67,7 +67,7 @@ esphome:
             // state and skip its triggers. The dial's GPIO keys publish theirs in setup.
             id(btn_pwr).publish_initial_state(false);
             id(btn_boot).publish_initial_state(false);
-            constexpr int WIN = 640, C = WIN / 2, D = 466, CASE = 586;
+            using namespace sim_keys;
             auto ring = [](int size, int width, uint32_t color) {
               lv_obj_t *o = lv_obj_create(lv_layer_top());
               lv_obj_remove_style_all(o);
@@ -85,35 +85,30 @@ esphome:
             ring(CASE, 2, 0x4a4c56);                   // case rim
             ring(D, 1, 0x5a5c66);                      // glass edge
 
-            auto key = [](const char *name, float deg, binary_sensor::BinarySensor *bs) {
-              constexpr int KW = 12, KH = 46, R = CASE / 2 + 4, LR = CASE / 2 + 36;
-              float a = deg * 3.14159265f / 180;
+            auto key = [](Key key, binary_sensor::BinarySensor *bs) {
               lv_obj_t *k = lv_obj_create(lv_layer_top());
               lv_obj_remove_style_all(k);
               lv_obj_set_size(k, KW, KH);
-              lv_obj_set_pos(k, C + R * cosf(a) - KW / 2, C + R * sinf(a) - KH / 2);
+              lv_obj_set_pos(k, cx(key) - KW / 2, cy(key) - KH / 2);
               lv_obj_set_style_radius(k, KW / 2, 0);
               lv_obj_set_style_bg_opa(k, LV_OPA_COVER, 0);
               lv_obj_set_style_bg_color(k, lv_color_hex(0x8a8c96), 0);
               lv_obj_set_style_bg_color(k, lv_color_hex(0xd8dae2), LV_STATE_PRESSED);
               lv_obj_set_style_transform_pivot_x(k, KW / 2, 0);
               lv_obj_set_style_transform_pivot_y(k, KH / 2, 0);
-              lv_obj_set_style_transform_rotation(k, (int) (deg * 10), 0);
-              lv_obj_set_ext_click_area(k, 14);
-              auto cb = [](lv_event_t *e) {
-                auto *s = (binary_sensor::BinarySensor *) lv_event_get_user_data(e);
-                s->publish_state(lv_event_get_code(e) == LV_EVENT_PRESSED);
-              };
-              for (auto code : {LV_EVENT_PRESSED, LV_EVENT_RELEASED, LV_EVENT_PRESS_LOST}) lv_obj_add_event_cb(k, cb, code, bs);
+              lv_obj_set_style_transform_rotation(k, (int) (DEG[key] * 10), 0);
+              lv_obj_add_flag(k, LV_OBJ_FLAG_CLICKABLE);  // no handlers (touchscreen: hit-tests the keys), but eats the press so it can't reach the UI root
+              lv_obj_set_ext_click_area(k, REACH);
+              bs->add_on_state_callback([k](bool on) { (on ? lv_obj_add_state : lv_obj_remove_state)(k, LV_STATE_PRESSED); });
               lv_obj_t *l = lv_label_create(lv_layer_top());
-              lv_label_set_text(l, name);
+              lv_label_set_text(l, NAME[key]);
               lv_obj_set_style_text_font(l, id(inter_20)->get_lv_font(), 0);
               lv_obj_set_style_text_color(l, lv_color_hex(0x8a8c96), 0);
               lv_obj_update_layout(l);
-              lv_obj_set_pos(l, C + LR * cosf(a) - lv_obj_get_width(l) / 2, C + LR * sinf(a) - lv_obj_get_height(l) / 2);
+              lv_obj_set_pos(l, cx(key, LR) - lv_obj_get_width(l) / 2, cy(key, LR) - lv_obj_get_height(l) / 2);
             };
-            key("PWR", -42, id(btn_pwr));
-            key("BOOT", 39, id(btn_boot));
+            key(PWR, id(btn_pwr));
+            key(BOOT, id(btn_boot));
 
 # ---- Board side (replaces dial-hardware.yaml) ----
 display:
@@ -129,6 +124,18 @@ touchscreen:
   - platform: sdl
     id: touch
     display: disp
+    # Case keys are hit-tested here, not as LVGL events: a paused LVGL (dark screen) drops presses (buddy/sim_keys.h).
+    on_touch:
+      - lambda: |-
+          switch (sim_keys::hit(touch.x, touch.y)) {
+            case sim_keys::PWR: id(btn_pwr).publish_state(true); break;
+            case sim_keys::BOOT: id(btn_boot).publish_state(true); break;
+            default: break;
+          }
+    on_release:
+      - lambda: |-
+          for (auto *bs : {id(btn_pwr), id(btn_boot)})
+            if (bs->state) bs->publish_state(false);
 
 output:
   - platform: template
@@ -137,12 +144,25 @@ output:
     write_action:
       # The panel going dark: LVGL is already paused (buddy-ui.yaml interval), so black the glass by hand.
       # Wake resumes LVGL, which invalidates the whole screen and redraws it.
+      - lambda: 'ESP_LOGD("sim", "brightness %.0f%%", state * 100);'
+      - if:
+          condition: { lambda: return state == 0; }
+          then: { script.execute: black_glass }
+
+# A touch on the dark glass (or the release of the sleep click) resumes LVGL, which repaints the stale UI before the
+# interval pauses it again. Re-black at that pause while the panel is off.
+lvgl:
+  on_pause:
+    - if:
+        condition: { lambda: 'return !id(display_brightness).current_values.is_on();' }
+        then: { script.execute: black_glass }
+
+script:
+  - id: black_glass
+    then:
       - lambda: |-
-          ESP_LOGD("sim", "brightness %.0f%%", state * 100);
-          if (state == 0) {
-            id(disp).filled_circle(320, 320, 232, Color::BLACK);
-            id(disp).update();
-          }
+          id(disp).filled_circle(320, 320, 232, Color::BLACK);
+          id(disp).update();
 
 light:
   - platform: monochromatic
