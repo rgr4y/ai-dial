@@ -1,5 +1,8 @@
 # make sim     desktop simulator (ESPHome host build, SDL window); bridge talks to it on 127.0.0.1.
 #              Rebuilds and relaunches 2 s after the last change to the UI / component sources or configs.
+# make test    test:cpp, then test:node
+#   test:cpp   host C++ tests (tests/test_*.cpp)
+#   test:node  the bridge's npm test (node --test)
 # make flash   build and OTA the dial (DIAL=ip overrides; else .env.dialip, last good IP, found via mDNS if empty)
 # Pets load from bridge/assets (DIAL_ASSETS overrides). Logs land in build/*.log as well as the terminal.
 
@@ -9,10 +12,23 @@ export DIAL_ASSETS
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c  # tee must not hide a failed build
 
-.PHONY: sim flash dialip
+.PHONY: sim flash dialip test test\:cpp test\:node
 # .env.dialip empty or missing: look the dial up on the network and record it. Otherwise nothing to do.
 dialip:
 	@[ -s .env.dialip ] || { ip=$$(scripts/find-dial.sh) && echo "$$ip" > .env.dialip && echo "dial at $$ip (.env.dialip)"; }
+
+test:  # make 3.81 drops escaped-colon prerequisites, so run the two by name
+	@$(MAKE) --no-print-directory test:cpp test:node
+
+test\:cpp:
+	@mkdir -p build
+	@for t in tests/test_*.cpp; do \
+	  b=build/$$(basename $$t .cpp); \
+	  c++ -std=c++17 -Wall -DSCENE_NO_LVGL -DCUBE_NO_LVGL $$t -o $$b && $$b || exit 1; \
+	done
+
+test\:node:
+	cd bridge && npm test
 
 sim: dialip
 	@mkdir -p build
