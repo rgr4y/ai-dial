@@ -72,8 +72,8 @@ font:
 lvgl:
   id: lvgl_comp
   displays: [disp]
-  # Paused while the screen is dark (interval below). A touch resumes it (resume_on_input, default on), the
-  # shield takes the press and wakes the UI.
+  # Paused while the screen is dark (interval below). A touch's release resumes it (resume_on_input, default on)
+  # but LVGL never saw the press, so the touchscreen hooks below wake the UI on release.
   on_resume:
     - lambda: id(lvgl_resumed_at) = millis();
   touchscreens: [touch]
@@ -101,7 +101,8 @@ interval:
             c.perform();
             id(lvgl_comp).set_paused(true, false);  // no renders or flushes while dark
           }
-          // A touch resumed LVGL but didn't wake the UI (press missed the shield): pause again after 1 s.
+          // LVGL resumed with the UI still asleep (a touch that began while awake, e.g. the sim's PWR click, ended
+          // after the sleep): pause again after 1 s. Dark-glass taps wake on release (touchscreen below).
           if (buddyui::ui().asleep && !id(lvgl_comp).is_paused() && millis() - id(lvgl_resumed_at) > 1000)
             id(lvgl_comp).set_paused(true, false);
           // New character pack on flash: reboot into it, but never under an open permission prompt.
@@ -110,7 +111,21 @@ interval:
             App.safe_reboot();
           }
 
+touchscreen:
+  - id: !extend touch
+    # LVGL is paused while dark: LVTouchListener::update drops the press (touch_pressed_ = !paused && ...), so the
+    # shield sees nothing. Wake on release instead; the finger is up, so the tap can't land on [ allow ].
+    on_touch:
+      - lambda: id(touch_in_dark) = id(lvgl_comp).is_paused();
+    on_release:
+      - lambda: |-
+          if (id(touch_in_dark) && buddyui::ui().asleep) buddyui::activity(millis());
+          id(touch_in_dark) = false;
+
 globals:
+  - id: touch_in_dark
+    type: bool
+    initial_value: "false"
   - id: lvgl_resumed_at
     type: uint32_t
     initial_value: "0"
