@@ -13,6 +13,7 @@
 // ($DIAL_ASSETS, else ./bridge/assets from the config directory), so a regenerated pack shows on the next sim run.
 #include "esphome/core/defines.h"
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <cinttypes>
@@ -41,6 +42,7 @@ inline size_t heap_caps_get_free_size(int) { return 0; }
 
 #include "esphome/components/json/json_util.h"
 #include "esphome/core/hal.h"
+#include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 #include "scene.h"
 
@@ -232,13 +234,6 @@ struct SyncJob {
   std::string url, rev;
 };
 
-static std::string hex(const uint8_t *b, size_t n) {
-  static const char *h = "0123456789abcdef";
-  std::string s;
-  for (size_t i = 0; i < n; i++) s += h[b[i] >> 4], s += h[b[i] & 15];
-  return s;
-}
-
 // GET url into a file (or memory when f is null); returns bytes and the sha256 hex, -1 on any error.
 inline long http_get(const std::string &url, FILE *f, PString *mem, std::string *sha) {
   esp_http_client_config_t cfg{};
@@ -265,10 +260,10 @@ inline long http_get(const std::string &url, FILE *f, PString *mem, std::string 
       total += n;
     }
     if (n < 0) total = -1;
-    uint8_t d[32];
-    mbedtls_sha256_finish(&ctx, d);
+    std::array<uint8_t, 32> d;
+    mbedtls_sha256_finish(&ctx, d.data());
     mbedtls_sha256_free(&ctx);
-    if (sha) *sha = hex(d, 32);
+    if (sha) *sha = esphome::format_hex(d);
   }
   esp_http_client_close(c);
   esp_http_client_cleanup(c);
