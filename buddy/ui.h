@@ -593,7 +593,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_flag(u.battery_page, LV_OBJ_FLAG_EVENT_BUBBLE);
   lv_obj_add_flag(u.battery_page, LV_OBJ_FLAG_HIDDEN);
   u.battery_ring = lv_arc_create(u.battery_page);
-  lv_obj_set_size(u.battery_ring, 384, 384);  // inside the arc-label band (radius ~194+), so the labels stay clear
+  lv_obj_set_size(u.battery_ring, 340, 340);  // outer radius 170: arc-label glyphs reach in to ~185
   lv_obj_center(u.battery_ring);
   lv_arc_set_rotation(u.battery_ring, 270);   // starts at 12 o'clock
   lv_arc_set_bg_angles(u.battery_ring, 0, 360);
