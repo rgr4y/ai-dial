@@ -28,6 +28,7 @@ esphome:
               if (id(pmu).isVbusIn() || !id(pmu).isBatteryConnect()) return -1;
               return std::isnan(id(bat_level).state) ? -1 : (int) id(bat_level).state;
             };
+            buddyui::ui().on_usb = []() { return id(pmu).isVbusIn(); };
             ESP_LOGI("buddy", "Free internal heap %u, largest block %u", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 

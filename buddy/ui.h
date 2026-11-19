@@ -95,6 +95,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   lv_obj_t *shield = nullptr;          // while dark: eats touches so a wake tap can't hit [ allow ]
   bool small_was = false;
   std::function<int()> battery;       // YAML: battery % when running on it, -1 when on USB or no cell
+  std::function<bool()> on_usb;       // YAML: true when VBUS is present; unset = battery rules
   bool was_live = false;               // the bridge has talked since boot (splash says "offline", not "looking")
   std::string arc_txt[2];
   uint32_t arc_col[2] = {0, 0};
@@ -955,7 +956,7 @@ inline void tick(uint32_t now) {
     last_state = now;
     update(now);
   }
-  if (!u.asleep && now > BOOT_AWAKE_MS && now - u.last_activity > SLEEP_MS) set_asleep(true);
+  if (u.idle_due(now, BOOT_AWAKE_MS, SLEEP_MS, u.on_usb && u.on_usb())) set_asleep(true);
 }
 
 // YAML hooks, polled from the 50 ms interval: take_wake() -> fade the panel in, take_sleep() -> fade it out.

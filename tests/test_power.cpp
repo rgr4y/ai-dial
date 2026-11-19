@@ -59,5 +59,19 @@ int main() {
   if (hit(cx(PWR), cy(PWR)) == PWR) sim.toggle(20);
   assert(!sim.asleep && tick(sim).wake);
 
+  // idle_due: battery times out, USB never, not during boot, not when asleep.
+  power::Screen idle;
+  idle.last_activity = 1000;
+  assert(!idle.idle_due(1000 + 300000, 5000, 300000, false));  // exactly at the timeout: not yet
+  assert(idle.idle_due(1000 + 300001, 5000, 300000, false));
+  assert(!idle.idle_due(1000 + 300001, 5000, 300000, true));   // USB
+  assert(!idle.idle_due(3000, 5000, 1000, false));              // inside boot_awake_ms
+  idle.set_asleep(true);
+  assert(!idle.idle_due(1000 + 300001, 5000, 300000, false));  // already asleep
+  idle.set_asleep(false);
+  // Unplug after a long idle on USB: due on the next tick (battery rules, no grace period).
+  assert(!idle.idle_due(900000, 5000, 300000, true));
+  assert(idle.idle_due(900001, 5000, 300000, false));
+
   puts("power ok");
 }
