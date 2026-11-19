@@ -118,8 +118,16 @@ globals:
 binary_sensor:
   - id: !extend btn_pwr
     on_press:  # PWR tap toggles the screen (ptt.c:20-22); via the UI so a dark screen also eats touches
-      - lambda: buddyui::toggle_screen(millis());
+      - lambda: |-
+          ESP_LOGD("btn", "PWR down");
+          buddyui::toggle_screen(millis());
+    on_release:
+      - lambda: 'ESP_LOGD("btn", "PWR up");'
   - id: !extend btn_boot
+    on_press:
+      - lambda: 'ESP_LOGD("btn", "BOOT down");'
+    on_release:
+      - lambda: 'ESP_LOGD("btn", "BOOT up");'
     on_click:  # BOOT tap: "later" on a prompt, usage screen from the face, else back to the face (ui.h boot())
       - max_length: 600ms
         then:

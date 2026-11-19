@@ -18,7 +18,10 @@ substitutions:
 host:
 
 logger:
-  level: INFO
+  level: DEBUG          # compiled in, so single tags can opt in below
+  initial_level: INFO   # everything else stays at INFO
+  logs:
+    btn: DEBUG          # PWR / BOOT presses (buddy-ui.yaml)
 
 api:
   reboot_timeout: 0s

@@ -15,7 +15,10 @@ packages:
   ui: !include buddy-ui.yaml
 
 logger:
-  level: INFO
+  level: DEBUG          # compiled in, so single tags can opt in below
+  initial_level: INFO   # everything else stays at INFO
+  logs:
+    btn: DEBUG          # PWR / BOOT presses (buddy-ui.yaml)
 
 esphome:
   on_boot:
