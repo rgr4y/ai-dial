@@ -2,16 +2,27 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
-  <key>Label</key><string>com.rob.dial-bridge</string>
-  <key>ProgramArguments</key>
-  <array>
-    <string>/opt/homebrew/bin/node</string>
-    <string>/Users/rob/workspace/autonomous-ai/bridge/dial-bridge.mjs</string>
-  </array>
-  <key>WorkingDirectory</key><string>/Users/rob/workspace/autonomous-ai/bridge</string>
-  <key>RunAtLoad</key><true/>
-  <key>KeepAlive</key><true/>
-  <key>StandardOutPath</key><string>/Users/rob/Library/Logs/dial-bridge.log</string>
-  <key>StandardErrorPath</key><string>/Users/rob/Library/Logs/dial-bridge.log</string>
+	<key>EnvironmentVariables</key>
+	<dict>
+		<key>DIAL_HOST</key>
+		<string>10.0.0.11,127.0.0.1</string>
+	</dict>
+	<key>KeepAlive</key>
+	<true/>
+	<key>Label</key>
+	<string>com.rob.dial-bridge</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/opt/homebrew/bin/node</string>
+		<string>/Users/rob/workspace/autonomous-ai/bridge/dial-bridge.mjs</string>
+	</array>
+	<key>RunAtLoad</key>
+	<true/>
+	<key>StandardErrorPath</key>
+	<string>/Users/rob/Library/Logs/dial-bridge.log</string>
+	<key>StandardOutPath</key>
+	<string>/Users/rob/Library/Logs/dial-bridge.log</string>
+	<key>WorkingDirectory</key>
+	<string>/Users/rob/workspace/autonomous-ai/bridge</string>
 </dict>
 </plist>
