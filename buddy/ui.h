@@ -17,6 +17,9 @@
 #include "power.h"
 #include "scene.h"
 #include "esphome/core/defines.h"
+#ifdef USE_ESP32
+#include <esp_timer.h>
+#endif
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
 #endif
@@ -71,6 +74,8 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   lv_obj_t *root = nullptr;
   lv_obj_t *name_arc = nullptr, *status_arc = nullptr;
   scene::Player scene, alert;
+  const scene::Scene *send_flat = nullptr;  // "send" flattened while the permission screen is up; once per boot
+  bool send_flat_tried = false;
   int card_lines = 0;  // recap card height in lines (1-4), set when its text changes
   bool card_overflow = false, card_manual = false;  // text past 4 lines; finger has taken over the scroll
   uint32_t card_manual_at = 0;                      // last touch / scroll movement while manual
@@ -927,6 +932,28 @@ inline void update(uint32_t now) {
     u.scene.stop();
     u.alert.stop();
     vis.on(u.perm);
+    if (!u.send_flat_tried) {
+      u.send_flat_tried = true;
+      if (const scene::Scene *sc = character::find("send")) {
+#ifdef USE_ESP32
+        int64_t t0 = esp_timer_get_time() / 1000;
+#else
+        int64_t t0 = esphome::millis();
+#endif
+        u.send_flat = scene::flatten(*sc);
+#ifdef USE_ESP32
+        int64_t ms = esp_timer_get_time() / 1000 - t0;
+#else
+        int64_t ms = esphome::millis() - t0;
+#endif
+        if (u.send_flat) {
+          const lv_image_dsc_t *f = u.send_flat->layers[0].frames[0];
+          ESP_LOGI("buddyui", "send flattened: %u steps %ux%u, %u KB PSRAM, %u ms", (unsigned) u.send_flat->steps,
+                   (unsigned) f->header.w, (unsigned) f->header.h, (unsigned) (f->data_size * u.send_flat->steps >> 10),
+                   (unsigned) ms);
+        }
+      }
+    }
     std::string title = "Allow " + (s.prompt_tool.empty() ? std::string("this") : s.prompt_tool) + "?";
     set_text(u.perm_title, title.c_str());
     set_text(u.perm_hint, s.prompt_hint.empty() ? "Needs your answer" : s.prompt_hint.c_str());
@@ -992,7 +1019,7 @@ inline void update(uint32_t now) {
                                    lv_indev_get_state(lv_indev_get_next(nullptr)) == LV_INDEV_STATE_PRESSED);
   if (sending) {
     u.alert.stop();
-    u.scene.play(character::find("send"), now, 0);  // voice face bias 0 (focus.c:670)
+    u.scene.play(u.send_flat ? u.send_flat : character::find("send"), now, 0);  // voice face bias 0 (focus.c:670)
     arc_text(u.status_arc, "Sent", RELAX_LINE);
   } else if (reading) {
     u.scene.stop();
