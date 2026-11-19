@@ -80,10 +80,12 @@ lvgl:
   buffer_size: 25%  # largest ESPHome keeps in internal SRAM
   bg_color: 0x000000
   # ui.h builds the screen in C++ on lv_scr_act(). These hidden widgets only make ESPHome enable what ui.h uses:
-  # the label keeps the font plumbing referenced, the arc sets LV_USE_ARC (battery page ring).
+  # the label keeps the font plumbing referenced, the arc sets LV_USE_ARC (battery page ring), the line
+  # LV_USE_LINE (charging bolt).
   widgets:
     - label: { hidden: true, text: "", text_font: inter_20 }
     - arc: { hidden: true }
+    - line: { hidden: true, points: [[0, 0], [1, 1]] }
 
 interval:
   # Harness redraws code-drawn motion every 50 ms; pets step at 55-120 ms.

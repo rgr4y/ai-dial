@@ -91,8 +91,11 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   bool battery_open = false;
   uint32_t battery_at = 0;
   lv_obj_t *battery_page = nullptr, *battery_ring = nullptr, *battery_num = nullptr;  // battery page (BOOT after usage)
-  lv_obj_t *bat_arc = nullptr;  // face-side battery %, left edge
+  lv_obj_t *bat_arc = nullptr, *bat_bolt = nullptr;  // face-side battery %, left edge; charging bolt after it
   std::string bat_txt;
+  bool bat_shimmer = false;  // on USB: the side % shimmers green like the working line
+  uint8_t bat_phase = 0;
+  lv_point_precise_t bat_bolt_pts[4] = {};
   std::string usage_key;  // usages_key the usage screen was built from
   std::string deferred_id;            // prompt the user put off with "later": face + alert until it changes
   bool was_running = false;
@@ -229,7 +232,8 @@ inline void pick_hint() {
 }
 
 inline uint8_t shimmer_phase(uint32_t now);
-inline void shimmer_paint(uint8_t phase);
+inline void shimmer_paint(lv_obj_t *a, const std::string &text, uint32_t fg, uint8_t phase);
+inline void place_bat_bolt();
 inline void arc_text(lv_obj_t *a, const char *text, uint32_t color, bool shimmer = false) {
   int i = a == ui().name_arc ? 0 : 1;
   if (i == 1) ui().shimmer = shimmer;
@@ -239,7 +243,7 @@ inline void arc_text(lv_obj_t *a, const char *text, uint32_t color, bool shimmer
   ui().arc_col[i] = color;
   if (i == 1 && shimmer) {  // paint the sweep now, not plain text for a frame
     ui().shimmer_phase = shimmer_phase(lv_tick_get());
-    return shimmer_paint(ui().shimmer_phase);
+    return shimmer_paint(ui().status_arc, ui().arc_txt[1], ui().arc_col[1], ui().shimmer_phase);
   }
   lv_obj_set_style_text_color(a, lv_color_hex(color), 0);
   lv_arclabel_set_text(a, text);
@@ -615,7 +619,15 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.bat_arc = mk_arc(root, u.f.f26m, true);
   lv_arclabel_set_angle_start(u.bat_arc, 150);
   lv_arclabel_set_angle_size(u.bat_arc, 60);
+  lv_arclabel_set_recolor(u.bat_arc, true);  // per-letter colour for the charging shimmer
   lv_obj_add_flag(u.bat_arc, LV_OBJ_FLAG_HIDDEN);
+  // Charging bolt after the side %: a stroked zigzag (Inter has no bolt glyph), turned to follow the arc text.
+  u.bat_bolt = lv_line_create(root);
+  lv_obj_set_style_line_width(u.bat_bolt, 4, 0);
+  lv_obj_set_style_line_rounded(u.bat_bolt, true, 0);
+  lv_obj_set_style_line_color(u.bat_bolt, lv_color_hex(LIVE), 0);
+  lv_obj_remove_flag(u.bat_bolt, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_add_flag(u.bat_bolt, LV_OBJ_FLAG_HIDDEN);
   // Shield last = topmost. Hidden while awake; while dark it takes the touch and only wakes the screen
   // (touch_habitat.c:133-138 swallows the wake contact the same way).
   u.shield = lv_obj_create(root);
@@ -825,14 +837,23 @@ inline void update(uint32_t now) {
     int bat = u.battery ? u.battery() : -1;
     bool side = v == View::FACE && bat >= 0 && u.show_battery_side(usb, now);
     show(u.bat_arc, side);
+    show(u.bat_bolt, side && usb);
     if (side) {
       char t[8];
       snprintf(t, sizeof(t), "%d%%", bat);
-      if (u.bat_txt != t) {
-        u.bat_txt = t;
-        lv_arclabel_set_text(u.bat_arc, t);
+      bool changed = u.bat_txt != t || u.bat_shimmer != usb;
+      u.bat_txt = t;
+      u.bat_shimmer = usb;
+      if (usb && changed) {  // green shimmer (painted per tick) + bolt placed after the text
+        u.bat_phase = shimmer_phase(now);
+        shimmer_paint(u.bat_arc, u.bat_txt, LIVE, u.bat_phase);
+        place_bat_bolt();
+      } else if (!usb) {
+        if (changed) lv_arclabel_set_text(u.bat_arc, t);
+        lv_obj_set_style_text_color(u.bat_arc, lv_color_hex(power::battery_ink(bat)), 0);
       }
-      lv_obj_set_style_text_color(u.bat_arc, lv_color_hex(power::battery_ink(bat)), 0);
+    } else {
+      u.bat_shimmer = false;
     }
   }
 
@@ -916,8 +937,10 @@ inline void update(uint32_t now) {
     lv_obj_set_style_text_color(u.battery_num, lv_color_hex(ink), 0);
     lv_arc_set_value(u.battery_ring, bat >= 0 ? bat : 100);
     lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(ink), LV_PART_INDICATOR);
+    bool usb = u.on_usb && u.on_usb();
     arc_text(u.name_arc, "Battery", NAME);
-    arc_text(u.status_arc, u.on_usb && u.on_usb() ? "Charging" : "Tap to close", RELAX_LINE);
+    if (usb) arc_text(u.status_arc, "Charging", LIVE, true);  // green working-line shimmer
+    else arc_text(u.status_arc, "Tap to close", RELAX_LINE);
     return;
   }
 
@@ -1008,15 +1031,13 @@ inline uint8_t shimmer_phase(uint32_t now) {
   unsigned step = (now / 64) % 32;
   return (uint8_t) (1 + (step < 20 ? step : 20));
 }
-inline void shimmer_paint(uint8_t phase) {
+inline void shimmer_paint(lv_obj_t *a, const std::string &text, uint32_t fg, uint8_t phase) {
   Ui &u = ui();
-  const std::string &text = u.arc_txt[1];
   const lv_font_t *f = u.f.f26m;
   int total = 0;
   for (size_t i = 0; i < text.size(); i++)
     if ((text[i] & 0xC0) != 0x80) total += lv_font_get_glyph_width(f, (uint8_t) text[i], 0);
   int center = -48 + (total + 96) * (phase - 1) / 20, pen = 0;
-  uint32_t fg = u.arc_col[1];
   std::string out;
   for (size_t i = 0; i < text.size();) {
     size_t n = 1;
@@ -1036,7 +1057,30 @@ inline void shimmer_paint(uint8_t phase) {
     pen += w;
     i += n;
   }
-  lv_arclabel_set_text(u.status_arc, out.c_str());
+  lv_arclabel_set_text(a, out.c_str());
+}
+// Bolt after the side % (bat_arc: clockwise 150..210 deg, centred on 180, r 205): rotate an upright 12x22 zigzag so
+// its top points outward like the arc glyphs, centred 10 px past the end of the text.
+inline void place_bat_bolt() {
+  Ui &u = ui();
+  static const float BOLT[4][2] = {{9, 0}, {1, 12}, {11, 12}, {3, 22}};  // centre (6, 11)
+  int w = 0;
+  for (char c : u.bat_txt) w += lv_font_get_glyph_width(u.f.f26m, (uint8_t) c, 0);
+  const float r = 205, deg = 3.14159265f / 180;
+  float th = 180 + (w / 2.0f + 10) / r / deg;  // bolt centre angle
+  float rot = (th + 90) * deg, cx = 233 + r * cosf(th * deg), cy = 233 + r * sinf(th * deg);
+  float xs[4], ys[4], minx = 1e9f, miny = 1e9f;
+  for (int i = 0; i < 4; i++) {
+    float dx = BOLT[i][0] - 6, dy = BOLT[i][1] - 11;
+    xs[i] = cx + dx * cosf(rot) - dy * sinf(rot);
+    ys[i] = cy + dx * sinf(rot) + dy * cosf(rot);
+    minx = std::min(minx, xs[i]);
+    miny = std::min(miny, ys[i]);
+  }
+  minx -= 2, miny -= 2;  // room for the 4 px stroke
+  for (int i = 0; i < 4; i++) u.bat_bolt_pts[i] = {(lv_value_precise_t) (xs[i] - minx), (lv_value_precise_t) (ys[i] - miny)};
+  lv_line_set_points(u.bat_bolt, u.bat_bolt_pts, 4);
+  lv_obj_set_pos(u.bat_bolt, (int32_t) minx, (int32_t) miny);
 }
 
 inline void tick(uint32_t now) {
@@ -1047,11 +1091,18 @@ inline void tick(uint32_t now) {
     u.scene.tick(now);
     u.alert.tick(now);
   }
+  if (u.bat_shimmer && !u.asleep) {  // charging: side % shimmers green, same sweep as the working line
+    uint8_t ph = shimmer_phase(now);
+    if (ph != u.bat_phase) {
+      u.bat_phase = ph;
+      shimmer_paint(u.bat_arc, u.bat_txt, LIVE, ph);
+    }
+  }
   if (u.shimmer && !u.asleep) {
     uint8_t ph = shimmer_phase(now);
     if (ph != u.shimmer_phase) {
       u.shimmer_phase = ph;
-      shimmer_paint(ph);
+      shimmer_paint(u.status_arc, u.arc_txt[1], u.arc_col[1], ph);
     }
   }
   if (!u.asleep && !lv_obj_has_flag(u.alarm, LV_OBJ_FLAG_HIDDEN)) {
