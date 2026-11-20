@@ -22,6 +22,12 @@ void ClaudeBuddy::loop() {
   }
 }
 
+void ClaudeBuddy::queue_notice(Notice n) {
+  if (this->notices_.size() >= 9)
+    this->notices_.erase(this->notices_.begin());
+  this->notices_.push_back(std::move(n));
+}
+
 void ClaudeBuddy::decide_(const char *decision) {
   if (this->snap_.prompt_id.empty())
     return;
@@ -112,10 +118,8 @@ void ClaudeBuddy::feed_line(const std::string &line) {
         const char *t = b["text"];
         if (t && *t && (doc["busy"] | 0u) > 0) {
           // Other sessions are still working: keep the face on them and queue this reply (the bell).
-          if (this->notices_.size() >= 9)
-            this->notices_.erase(this->notices_.begin());
-          this->notices_.push_back({doc["sid"] | "", t, doc["agent"] | "",
-                                    {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""}});
+          this->queue_notice({doc["sid"] | "", t, doc["agent"] | "",
+                              {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""}});
           this->notify_();
           break;
         }

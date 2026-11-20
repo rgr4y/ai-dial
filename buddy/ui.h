@@ -70,6 +70,8 @@ static constexpr int RECAP_MAX = 2000;          // codepoints; focus.c:793 cut a
 static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_PX_S = 120;
 // Finger-scrolled card: autoscroll resumes this long after the last touch or scroll movement.
 static constexpr uint32_t CARD_MANUAL_MS = 5000;
+// A reply card untouched this long (since the reply or the last touch / scroll) moves to the bell. USB or battery alike.
+static constexpr uint32_t REPLY_TO_BELL_MS = 120000;
 
 // Voice (hold the face): LISTEN while the finger is down, WAIT for the bridge's final text, CONFIRM shows it (a tap
 // cancels), SEND for one update (the bridge types it into the session), NOTE a short message. Protocol: DIAL-PROTOCOL.md.
@@ -977,6 +979,14 @@ inline void update(uint32_t now) {
   auto &notices = b->notices();
   if (notices.size() > u.notice_n) activity(now);  // a reply from another session wakes the dial
   u.notice_n = notices.size();
+  // An unread reply card ages out: it becomes a bell notice and the face goes idle. Not a notice opened from the bell,
+  // not mid-voice. notice_n follows the push so it doesn't wake the dial.
+  if (!running && u.view == View::FACE && !u.viewing && u.voice == Voice::OFF && !b->last_text().empty() &&
+      b->last_text_ms() > u.recap_cleared && now - u.last_activity >= REPLY_TO_BELL_MS) {
+    b->queue_last_reply();
+    u.recap_cleared = b->last_text_ms();
+    u.notice_n = notices.size();
+  }
   if (u.deferred_id != s.prompt_id && !s.prompt_id.empty()) u.deferred_id.clear();
   // Voice: a bridge line (words, final, error), then the timers: confirm -> send, wait / note give up, send -> off.
   const auto &vl = b->voice();

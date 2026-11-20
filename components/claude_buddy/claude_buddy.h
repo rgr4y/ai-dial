@@ -90,6 +90,10 @@ class ClaudeBuddy : public Component {
   const std::string &last_sid() const { return this->last_sid_; }  // session that wrote last_text
   const VoiceLine &voice() const { return this->voice_; }
   std::vector<Notice> &notices() { return this->notices_; }  // oldest first; the UI pops them when read
+  // Queue a notice (bell), dropping the oldest past 9.
+  void queue_notice(Notice n);
+  // The reply on the card (last_text) becomes a notice, as if it had come in while other sessions worked.
+  void queue_last_reply() { this->queue_notice({this->last_sid_, this->last_text_, this->last_agent_, this->last_bot_}); }
   void approve() { this->decide_("once"); }
   void deny() { this->decide_("deny"); }
 
