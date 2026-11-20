@@ -236,7 +236,8 @@ function voiceStop(dial) {
 // announcement (media_url + announcement) on the dial; the firmware's on_announcement turns the amp on, on_idle off.
 // Resolves true when the dial reported announcing and then left it (playback done: qr8 re-arms the mic on that), false
 // when there was nothing to say, no dial, or the dial never started / never finished (logged).
-const ANNOUNCING = pb.MediaPlayerState.MEDIA_PLAYER_STATE_ANNOUNCING;
+// The API reports an announcement as PLAYING, never ANNOUNCING (esphome api_connection.cpp try_send_media_player_state).
+const PLAYING = pb.MediaPlayerState.MEDIA_PLAYER_STATE_PLAYING;
 function waitPlayed(dial, ms) {
   return new Promise((res) => {
     let started = false;
@@ -245,7 +246,7 @@ function waitPlayed(dial, ms) {
     const endT = setTimeout(() => { log(`speak: ${dial.host} announcement did not finish`); end(false); }, ms + 15000);
     dial.onPlayer = (st) => {
       if (st === null) end(false);  // disconnected
-      else if (st === ANNOUNCING) started = true;
+      else if (st === PLAYING) started = true;
       else if (started) end(true);
     };
   });
@@ -254,7 +255,7 @@ async function speak(dial, text) {
   dial ??= dials.find((d) => d.ready && d.playerKey != null);
   const addr = dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
   if (!dial?.ready || dial.playerKey == null || !addr) return log('speak: no dial with a media player'), false;
-  const wav = await synthesize(text, { host: TTS_HOST, port: TTS_PORT });
+  const wav = await synthesize(text, { host: TTS_HOST, port: TTS_PORT });  // no voice: the server's default
   if (!wav) return false;
   const url = `http://${addr}:${ASSETS_PORT}/tts/${stashTts(wav)}.wav`;
   const played = waitPlayed(dial, wavMs(wav));
