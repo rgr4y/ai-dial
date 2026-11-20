@@ -224,6 +224,16 @@ inline lv_obj_t *mk_page(lv_obj_t *parent, bool bubble, bool hidden) {
   if (hidden) lv_obj_set_hidden(p, true);
   return p;
 }
+// Bare filled rounded rect: size, radius and an opaque fill. Callers add position, events, hidden and the like.
+inline lv_obj_t *mk_fill(lv_obj_t *parent, int32_t w, int32_t h, int32_t radius, uint32_t color) {
+  lv_obj_t *o = lv_obj_create(parent);
+  lv_obj_remove_style_all(o);
+  lv_obj_set_size(o, w, h);
+  lv_obj_set_style_radius(o, radius, 0);
+  lv_obj_set_style_bg_color(o, lv_color_hex(color), 0);
+  lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
+  return o;
+}
 inline lv_obj_t *mk_card(lv_obj_t *parent) {
   // Recap card: radius 24, fill 0x1c1e26, rim 0x3d3f47 (focus.c:879-885). Harness x 41 w 384 clipped the round
   // glass at 4 lines (bottom corners at r ~234) and touched the face-side battery %: x 49 w 368 keeps r <= 228.
@@ -694,14 +704,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
 
   // Bell pill (spec §2.6 colour, 0x006fff, fully rounded): 54 px tall in Inter 25 (spec: 32 / 20, too small a tap),
   // centred at y 388 so its corners stay inside the glass.
-  u.bell = lv_obj_create(root);
-  lv_obj_remove_style_all(u.bell);
-  lv_obj_set_style_bg_color(u.bell, lv_color_hex(BLUE), 0);
-  lv_obj_set_style_bg_opa(u.bell, LV_OPA_COVER, 0);
-  lv_obj_set_style_radius(u.bell, LV_RADIUS_CIRCLE, 0);
+  u.bell = mk_fill(root, LV_SIZE_CONTENT, 54, LV_RADIUS_CIRCLE, BLUE);
   lv_obj_set_style_bg_color(u.bell, lv_color_darken(lv_color_hex(BLUE), LV_OPA_30), LV_STATE_PRESSED);
   lv_obj_set_style_pad_hor(u.bell, 34, 0);
-  lv_obj_set_size(u.bell, LV_SIZE_CONTENT, 54);
   lv_obj_align(u.bell, LV_ALIGN_TOP_MID, 0, 388 - 27);
   lv_obj_set_clickable(u.bell, true);
   lv_obj_set_ext_click_area(u.bell, 20);
@@ -720,10 +725,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
 
   // Usage alarm (new): big red percentage, scaled from its centre in tick().
   for (auto &o : u.burst) {
-    o = lv_obj_create(root);
-    lv_obj_remove_style_all(o);
-    lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_color(o, lv_color_hex(LIVE), 0);
+    o = mk_fill(root, 14, 14, LV_RADIUS_CIRCLE, LIVE);  // burst_step sets size and bg_opa on every frame
     lv_obj_set_clickable(o, false);
     show(o, false);
   }
@@ -763,11 +765,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_clickable(u.dots, false);
   lv_obj_set_hidden(u.dots, true);
   for (int i = 0; i < Ui::DOTS_MAX; i++) {
-    lv_obj_t *d = u.dot[i] = lv_obj_create(u.dots);
-    lv_obj_remove_style_all(d);
-    lv_obj_set_size(d, Ui::DOT_D, Ui::DOT_D);
-    lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
-    lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+    lv_obj_t *d = u.dot[i] = mk_fill(u.dots, Ui::DOT_D, Ui::DOT_D, LV_RADIUS_CIRCLE, 0x4a4c56);  // update() recolours
     lv_obj_set_clickable(d, false);
   }
 
@@ -797,13 +795,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_label_set_text(u.ota_pct, "0%");
   lv_obj_align(u.ota_pct, LV_ALIGN_CENTER, 0, -30);
   auto ota_rect = [&](int w, uint32_t col) {
-    lv_obj_t *o = lv_obj_create(u.ota_page);
-    lv_obj_remove_style_all(o);
-    lv_obj_set_size(o, w, 14);
+    lv_obj_t *o = mk_fill(u.ota_page, w, 14, 7, col);
     lv_obj_set_pos(o, (scene::W - OTA_BAR_W) / 2, scene::C + 50);
-    lv_obj_set_style_radius(o, 7, 0);
-    lv_obj_set_style_bg_color(o, lv_color_hex(col), 0);
-    lv_obj_set_style_bg_opa(o, LV_OPA_COVER, 0);
     return o;
   };
   ota_rect(OTA_BAR_W, 0x2a2c34);
@@ -918,13 +911,8 @@ inline void build_usage() {
     lv_obj_set_event_bubble(l, true);
   };
   auto bar = [&](int x, int cy, int w, uint32_t col) {
-    lv_obj_t *b = lv_obj_create(u.usage);
-    lv_obj_remove_style_all(b);
-    lv_obj_set_size(b, w, 10);
+    lv_obj_t *b = mk_fill(u.usage, w, 10, 5, col);
     lv_obj_set_pos(b, x, cy - 5);
-    lv_obj_set_style_radius(b, 5, 0);
-    lv_obj_set_style_bg_color(b, lv_color_hex(col), 0);
-    lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
     lv_obj_set_event_bubble(b, true);
     return b;
   };
