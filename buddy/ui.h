@@ -559,7 +559,7 @@ inline void voice_note(const char *t, uint32_t now) {
   u.voice_at = now;
 }
 // The session the face is about: the focused working one, an opened notice's, or the one whose reply is on the card.
-// Empty when the face is about nobody (nothing to type into).
+// Empty when the face is about nobody: the bridge router then needs a session name.
 inline std::string voice_target() {
   Ui &u = ui();
   ClaudeBuddy *b = u.buddy;
@@ -576,9 +576,8 @@ inline void on_hold(lv_event_t *) {
   activity(now);
   u.voice_sid = voice_target();
   u.voice_text.clear();
-  if (u.voice_sid.empty()) {
-    voice_note("No session to talk to", now);
-  } else if (!u.on_voice || !u.on_voice(true)) {
+  // No session on the face (idle, card dismissed) still listens: the bridge's router picks one by name, else asks.
+  if (!u.on_voice || !u.on_voice(true)) {
     voice_note("Voice is offline", now);
   } else {
     u.voice = Voice::LISTEN;

@@ -189,7 +189,8 @@ function voiceStop(dial) {
     log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
     const name = (sid) => sessions.find((s) => s.id === sid)?.name || sid;
     if (r.action === 'send') {
-      if (!r.sid || !board.tty(r.sid)) {
+      if (!r.sid) return say(dial, { error: 'Which session? Say its name' });  // nothing on the face, none named
+      if (!board.tty(r.sid)) {
         log(`voice: no terminal known for session ${r.sid || '(none)'}, dropped`);
         return say(dial, { error: 'No terminal for that session' });
       }
