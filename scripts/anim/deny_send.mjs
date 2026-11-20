@@ -4,18 +4,15 @@
 //     node scripts/anim/deny_send.mjs [out-dir]     default build/anim/claude (send and deny_send, one pack)
 //
 // gen_buddy_pets.mjs imports { sets, scenes } from here; importing writes nothing. Plays once (no letter comes back).
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PET_SCALE, frameFile, raw565a8, scaleScene } from './frames.mjs';
-import { render } from './render.mjs';
-import { scenes as sendScenes, sets as sendSets } from './send.mjs';
+import { PET_SCALE, scaleScene } from './frames.mjs';
+import { writePack } from './render.mjs';
+import { part, scenes as sendScenes, sets as sendSets } from './send.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const OUT = resolve(process.argv[2] ?? join(ROOT, 'build/anim/claude'));
 
-const part = (name) => readFileSync(join(ROOT, 'art/claude', `${name}.svg`), 'utf8');
 const plain = (name) => {
   const s = part(name), [x, y, w, h] = s.match(/<svg[^>]*viewBox="([^"]*)"/)[1].split(' ').map(Number);
   return { svg: s, at: [x, y], w, h };
@@ -61,20 +58,4 @@ export const scenes = {
 };
 scaleScene(PET_SCALE, sets, layers, scenes.deny_send);  // own sets only: send's are scaled in send.mjs
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  rmSync(OUT, { recursive: true, force: true });
-  const files = {}, manifestSets = {};
-  for (const [name, frames] of Object.entries({ ...sendSets, ...sets })) {
-    mkdirSync(join(OUT, name), { recursive: true });
-    manifestSets[name] = frames.map((f, k) => {
-      const px = render(f.svg), file = frameFile(px.w, px.h, raw565a8(px)), path = `${name}/${k}.bin`;
-      writeFileSync(join(OUT, path), file);
-      files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
-      return path;
-    });
-  }
-  const all = { ...sendScenes, ...scenes };
-  const rev = createHash('sha256').update(JSON.stringify([files, all])).digest('hex').slice(0, 16);
-  writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ name: 'claude', rev, files, sets: manifestSets, scenes: all }));
-  console.log(`deny_send: ${Object.keys(files).length} frames, rev ${rev} -> ${OUT}`);
-}
+if (process.argv[1] === fileURLToPath(import.meta.url)) writePack(OUT, 'deny_send', { ...sendSets, ...sets }, { ...sendScenes, ...scenes });

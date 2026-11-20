@@ -6,10 +6,12 @@
 //
 // Dependencies come from bridge/ (run `npm install` there once).
 import assert from 'node:assert/strict';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { frameFile, raw565a8 } from './frames.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const req = createRequire(join(ROOT, 'bridge/package.json'));
@@ -34,6 +36,26 @@ export function writePng(path, { w, h, rgba }) {
   const png = new PNG({ width: w, height: h });
   rgba.copy(png.data);
   writeFileSync(path, PNG.sync.write(png));
+}
+
+// Render every frame of every set to <out>/<set>/<k>.bin plus manifest.json (the scene builders' shared main block).
+export function writePack(out, label, sets, scenes) {
+  rmSync(out, { recursive: true, force: true });
+  const files = {}, manifestSets = {};
+  for (const [name, frames] of Object.entries(sets)) {
+    mkdirSync(join(out, name), { recursive: true });
+    manifestSets[name] = frames.map((f, k) => {
+      const px = render(f.svg), file = frameFile(px.w, px.h, raw565a8(px)), path = `${name}/${k}.bin`;
+      f.w = px.w; f.h = px.h;
+      writeFileSync(join(out, path), file);
+      files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
+      return path;
+    });
+  }
+  const rev = createHash('sha256').update(JSON.stringify([files, scenes])).digest('hex').slice(0, 16);
+  writeFileSync(join(out, 'manifest.json'), JSON.stringify({ name: 'claude', rev, files, sets: manifestSets, scenes }));
+  const bytes = Object.values(files).reduce((a, f) => a + f.size, 0);
+  console.log(`${label}: ${Object.keys(files).length} frames, ${bytes} bytes packed, rev ${rev} -> ${out}`);
 }
 
 function selfTest() {

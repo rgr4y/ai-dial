@@ -12,22 +12,21 @@
 //
 // Rotation, scale and clipping happen here at render time; the device only translates frames.
 // Dependencies come from bridge/ (run `npm install` there once).
-import { createHash } from 'node:crypto';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { PET_SCALE, frameFile, raw565a8, scaleScene } from './frames.mjs';
-import { render } from './render.mjs';
+import { PET_SCALE, scaleScene } from './frames.mjs';
+import { writePack } from './render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ART = join(ROOT, 'art/claude');
 const OUT = resolve(process.argv[2] ?? join(ROOT, 'build/anim/claude'));
 
 // ---- parts ---------------------------------------------------------------------------------------------------
-const part = (name) => readFileSync(join(ART, `${name}.svg`), 'utf8');
-const head = (s) => s.match(/<svg[^>]*>/)[0];
-const attr = (s, a) => s.match(new RegExp(`\\b${a}="([^"]*)"`))[1];
-const inner = (s) => s.slice(head(s).length + s.indexOf(head(s)), s.lastIndexOf('</svg>'));
+export const part = (name) => readFileSync(join(ART, `${name}.svg`), 'utf8');
+export const head = (s) => s.match(/<svg[^>]*>/)[0];
+export const attr = (s, a) => s.match(new RegExp(`\\b${a}="([^"]*)"`))[1];
+export const inner = (s) => s.slice(head(s).length + s.indexOf(head(s)), s.lastIndexOf('</svg>'));
 
 // A part as a frame at its own place: viewBox origin is its position in scene coords (frame 0 pose).
 function plain(name) {
@@ -111,21 +110,4 @@ export const scenes = {
 scaleScene(PET_SCALE, sets, layers, scenes.send);
 
 // ---- write ---------------------------------------------------------------------------------------------------
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  rmSync(OUT, { recursive: true, force: true });
-  const files = {}, manifestSets = {};
-  for (const [name, frames] of Object.entries(sets)) {
-    mkdirSync(join(OUT, name), { recursive: true });
-    manifestSets[name] = frames.map((f, k) => {
-      const px = render(f.svg), file = frameFile(px.w, px.h, raw565a8(px)), path = `${name}/${k}.bin`;
-      f.w = px.w; f.h = px.h;
-      writeFileSync(join(OUT, path), file);
-      files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
-      return path;
-    });
-  }
-  const rev = createHash('sha256').update(JSON.stringify([files, scenes])).digest('hex').slice(0, 16);
-  writeFileSync(join(OUT, 'manifest.json'), JSON.stringify({ name: 'claude', rev, files, sets: manifestSets, scenes }));
-  const bytes = Object.values(files).reduce((a, f) => a + f.size, 0);
-  console.log(`send: ${Object.keys(files).length} frames, ${bytes} bytes packed, rev ${rev} -> ${OUT}`);
-}
+if (process.argv[1] === fileURLToPath(import.meta.url)) writePack(OUT, 'send', sets, scenes);
