@@ -70,7 +70,7 @@ const waiters = new Map(); // prompt id -> resolve(decision | null)
 
 // ---- dial links ----
 // One per host: { host, client, keys, ready, ui }.
-const dials = HOSTS.map((host) => ({ host, client: null, lineKey: null, tapKey: null, decisionKey: null, uiKey: null,
+const dials = HOSTS.map((host) => ({ host, client: null, lineKey: null, decisionKey: null, uiKey: null,
                                      ready: false, ui: null, lastErr: null, stt: null, pending: null, ask: null, playerKey: null, playerState: null, onPlayer: null }));
 const anyReady = () => dials.some((d) => d.ready);
 // The address the dial reaches us at: our end of its API connection.
@@ -93,7 +93,6 @@ function connectDial(dial) {
   dial.client = client;
   client.connection.on('message.ListEntitiesServicesResponse', (m) => {
     if (m.name === 'buddy_line') dial.lineKey = m.key;
-    if (m.name === 'buddy_tap') dial.tapKey = m.key;
   });
   client.connection.on('message.ListEntitiesTextSensorResponse', (m) => {
     // Match on name too: recent ESPHome leaves object_id empty in ListEntities.
