@@ -347,6 +347,20 @@ inline void burst_step(void *, int32_t v) {
     lv_obj_set_style_bg_opa(u.burst[i], (lv_opa_t) (255 * (1 - t * t)), 0);
   }
 }
+// An anim set up but not started, so callers can add reverse, repeat, user data or a completed cb before lv_anim_start.
+// A null path keeps lv_anim_init's linear one.
+inline lv_anim_t make_anim(void *var, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint32_t ms, uint32_t delay = 0,
+                           lv_anim_path_cb_t path = nullptr) {
+  lv_anim_t a;
+  lv_anim_init(&a);
+  lv_anim_set_var(&a, var);
+  lv_anim_set_exec_cb(&a, cb);
+  lv_anim_set_values(&a, from, to);
+  lv_anim_set_duration(&a, ms);
+  lv_anim_set_delay(&a, delay);
+  if (path) lv_anim_set_path_cb(&a, path);
+  return a;
+}
 inline void burst() {
   Ui &u = ui();
   for (int i = 0; i < Ui::BURST_N; i++) {
@@ -354,12 +368,7 @@ inline void burst() {
     lv_obj_move_foreground(u.burst[i]);
     show(u.burst[i], true);
   }
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, &u);
-  lv_anim_set_exec_cb(&a, burst_step);
-  lv_anim_set_values(&a, 0, 1000);
-  lv_anim_set_duration(&a, 700);
+  lv_anim_t a = make_anim(&u, burst_step, 0, 1000, 700);
   lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
     for (auto *o : ui().burst) show(o, false);
   });
@@ -369,14 +378,7 @@ inline void burst() {
 inline void splash_in() {
   Ui &u = ui();
   auto run = [](lv_obj_t *o, lv_anim_exec_xcb_t cb, int32_t from, int32_t to, uint32_t ms, uint32_t delay) {
-    lv_anim_t a;
-    lv_anim_init(&a);
-    lv_anim_set_var(&a, o);
-    lv_anim_set_exec_cb(&a, cb);
-    lv_anim_set_values(&a, from, to);
-    lv_anim_set_duration(&a, ms);
-    lv_anim_set_delay(&a, delay);
-    lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
+    lv_anim_t a = make_anim(o, cb, from, to, ms, delay, lv_anim_path_ease_out);
     lv_anim_start(&a);
   };
   auto opa = [](void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *) o, (lv_opa_t) v, 0); };
@@ -855,18 +857,12 @@ inline void card_scroll_y(void *o, int32_t y) { lv_obj_scroll_to_y((lv_obj_t *) 
 
 // Autoscroll cycle: hold at the top, scroll down dist px, hold, back up quicker, repeat.
 inline void start_card_anim(int dist) {
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, ui().card_text);
-  lv_anim_set_exec_cb(&a, card_scroll_y);
-  lv_anim_set_values(&a, 0, dist);
-  lv_anim_set_delay(&a, CARD_HOLD_MS);
-  lv_anim_set_duration(&a, dist * 1000 / CARD_SCROLL_PX_S);
+  lv_anim_t a = make_anim(ui().card_text, card_scroll_y, 0, dist, dist * 1000 / CARD_SCROLL_PX_S, CARD_HOLD_MS,
+                          lv_anim_path_ease_in_out);
   lv_anim_set_reverse_delay(&a, CARD_HOLD_MS);
   lv_anim_set_reverse_duration(&a, dist * 1000 / CARD_BACK_PX_S);
   lv_anim_set_repeat_delay(&a, CARD_HOLD_MS);
   lv_anim_set_repeat_count(&a, LV_ANIM_REPEAT_INFINITE);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
   lv_anim_start(&a);
 }
 // 5 s after the last touch: back to the top at CARD_BACK_PX_S, then the normal cycle.
@@ -876,13 +872,7 @@ inline void resume_card_anim() {
   int32_t y = lv_obj_get_scroll_top(u.card_text);
   int dist = y + lv_obj_get_scroll_bottom(u.card_text);  // content overflow, constant while scrolling
   if (y <= 0) return start_card_anim(dist);
-  lv_anim_t a;
-  lv_anim_init(&a);
-  lv_anim_set_var(&a, u.card_text);
-  lv_anim_set_exec_cb(&a, card_scroll_y);
-  lv_anim_set_values(&a, y, 0);
-  lv_anim_set_duration(&a, y * 1000 / CARD_BACK_PX_S);
-  lv_anim_set_path_cb(&a, lv_anim_path_ease_in_out);
+  lv_anim_t a = make_anim(u.card_text, card_scroll_y, y, 0, y * 1000 / CARD_BACK_PX_S, 0, lv_anim_path_ease_in_out);
   lv_anim_set_user_data(&a, (void *) (intptr_t) dist);
   lv_anim_set_completed_cb(&a, [](lv_anim_t *an) { start_card_anim((int) (intptr_t) lv_anim_get_user_data(an)); });
   lv_anim_start(&a);
@@ -964,13 +954,9 @@ inline void build_usage() {
       label(u.f.f20, RELAX_LINE, w.label, X, cy, 72, LV_TEXT_ALIGN_LEFT);
       bar(BX, cy, BW, 0x2a2c34);
       lv_obj_t *fill = bar(BX, cy, 10, ink);
-      lv_anim_t a;
-      lv_anim_init(&a);
-      lv_anim_set_var(&a, fill);
-      lv_anim_set_values(&a, 10, std::max<int>(10, BW * (int) std::min<uint32_t>(w.pct, 100) / 100));
-      lv_anim_set_duration(&a, 500);
-      lv_anim_set_path_cb(&a, lv_anim_path_ease_out);
-      lv_anim_set_exec_cb(&a, [](void *o, int32_t v) { lv_obj_set_width((lv_obj_t *) o, v); });
+      lv_anim_t a = make_anim(fill, [](void *o, int32_t v) { lv_obj_set_width((lv_obj_t *) o, v); }, 10,
+                              std::max<int>(10, BW * (int) std::min<uint32_t>(w.pct, 100) / 100), 500, 0,
+                              lv_anim_path_ease_out);
       lv_anim_start(&a);
       char pct[8];
       snprintf(pct, sizeof(pct), "%u%%", (unsigned) w.pct);
