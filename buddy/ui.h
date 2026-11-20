@@ -1090,9 +1090,13 @@ inline void update(uint32_t now) {
   bool sending = now - u.sent_at < SEND_MS && u.sent_at;
   const char *name = "Claude";
 
-  if (v == View::OTA) {  // ota() owns the widgets and arcs; nothing else may change the page
+  // The pages stop the pet and the alert. Not hoisted into the face path: stop() clears sc, and a play() after it restarts.
+  if (v == View::OTA || v == View::PERMISSION || v == View::USAGE || v == View::BATTERY) {
     u.scene.stop();
     u.alert.stop();
+  }
+
+  if (v == View::OTA) {  // ota() owns the widgets and arcs; nothing else may change the page
     vis.on(u.ota_page);
     return;
   }
@@ -1116,11 +1120,8 @@ inline void update(uint32_t now) {
     return;
   }
 
-  if (v != View::FACE) arc_text(u.name_arc, name, provider_ink(name, NAME));  // the face names whoever it shows
-
   if (v == View::PERMISSION) {
-    u.scene.stop();
-    u.alert.stop();
+    arc_text(u.name_arc, name, provider_ink(name, NAME));  // USAGE and BATTERY name themselves; the face names whoever it shows
     vis.on(u.perm);
     std::string title = "Allow " + (s.prompt_tool.empty() ? std::string("this") : s.prompt_tool) + "?";
     set_text(u.perm_title, title.c_str());
@@ -1133,8 +1134,6 @@ inline void update(uint32_t now) {
   }
 
   if (v == View::USAGE) {
-    u.scene.stop();
-    u.alert.stop();
     vis.on(u.usage);
     if (entered || u.usage_key != s.usages_key) {
       u.usage_key = s.usages_key;
@@ -1146,8 +1145,6 @@ inline void update(uint32_t now) {
   }
 
   if (v == View::BATTERY) {
-    u.scene.stop();
-    u.alert.stop();
     vis.on(u.battery_page);
     int bat = u.battery ? u.battery() : -1;
     uint32_t ink = bat >= 0 ? power::battery_ink(bat) : RELAX_LINE;
