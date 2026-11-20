@@ -117,6 +117,8 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   bool build = false;                 // cook or build, picked per 0 -> >0 edge (focus.c:219-231)
   uint32_t work_start = 0;            // local stopwatch: the protocol carries no start time
   uint32_t recap_cleared = 0;         // turn text at or before this is not shown
+  uint32_t idle_turn = 0;             // idle provider cycle position: steps only while the idle face is up
+  uint32_t idle_k = 0, idle_seen = 0; // usage-flash slot (now / USAGE_EVERY_MS) and time of the last idle update
   uint32_t sent_at = 0;               // claude_send plays until sent_at + SEND_MS
   const char *hint = "What's next?";
   lv_obj_t *shield = nullptr;          // while dark: eats touches so a wake tap can't hit Allow
@@ -1105,7 +1107,12 @@ inline void update(uint32_t now) {
       if ((pets[n] = character::find((std::string(pet[0]) + "_xl").c_str())) || (pets[n] = character::find(pet[0])))
         names[n++] = pet[1];
     bool grok = live && !s.bots.empty();
-    uint32_t turn = now / USAGE_EVERY_MS, providers = n + grok, p = turn % providers;
+    // The cycle steps at each usage-flash boundary the idle face is up for, and holds while anything else shows (busy,
+    // reply, prompt, dark), so coming back to idle resumes it instead of landing wherever the clock says.
+    uint32_t k = now / USAGE_EVERY_MS;
+    if (k != u.idle_k && now - u.idle_seen < 2500) u.idle_turn++;  // tick() updates at least once a second
+    u.idle_k = k, u.idle_seen = now;
+    uint32_t turn = u.idle_turn, providers = n + grok, p = turn % providers;
     if (grok && b->mute_api) p = n;  // sim pin (scripts/sim-panel.mjs): a pinned roster shows only its bots
     const esphome::claude_buddy::Bot *g = grok && p == n ? &s.bots[turn / providers % s.bots.size()] : nullptr;
     const scene::Scene *bot = g ? character::find(("grok_" + g->shape).c_str()) : nullptr;
