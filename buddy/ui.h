@@ -79,8 +79,10 @@ static constexpr uint32_t CARD_SHORT_MS = 10000, REPLY_TO_BELL_MS = 120000;
 // cancels), SEND for one update (the bridge types it into the session), NOTE a short message. An "ask" line from the
 // bridge (it could not pick a session) shows the question and listens again with no hold, VOICE_ASK_MS or until a tap.
 // Protocol: DIAL-PROTOCOL.md.
+// tail: mic keeps running this long after release (buffered words). SEND is held VOICE_SEND_MS: the API batches state
+// (100 ms, latest value per entity), so a one-tick SEND was often replaced by OFF before the bridge saw it.
 static constexpr uint32_t VOICE_CONFIRM_MS = 2000, VOICE_TAIL_MS = 300, VOICE_WAIT_MS = 10000, VOICE_NOTE_MS = 2000,
-                          VOICE_MAX_MS = 60000, VOICE_ASK_MS = 4000;  // tail: mic keeps running this long after release (buffered words)
+                          VOICE_MAX_MS = 60000, VOICE_ASK_MS = 4000, VOICE_SEND_MS = 500;
 enum class Voice : uint8_t { OFF, LISTEN, WAIT, CONFIRM, SEND, NOTE };
 static const char *const VOICE_NAMES[] = {"off", "listening", "wait", "confirm", "send", "note"};
 
@@ -1014,9 +1016,9 @@ inline void update(uint32_t now) {
       }
     }
   }
-  if (u.voice == Voice::SEND && now != u.voice_at) u.voice = Voice::OFF;
+  if (u.voice == Voice::SEND && now - u.voice_at >= VOICE_SEND_MS) u.voice = Voice::OFF;
   else if (u.voice == Voice::CONFIRM && now - u.voice_at >= VOICE_CONFIRM_MS) {
-    u.voice = Voice::SEND;  // published once: the bridge types the text; the face plays "Sent"
+    u.voice = Voice::SEND;  // held VOICE_SEND_MS so the bridge sees it: it types the text; the face plays "Sent"
     u.voice_at = now;
     u.sent_at = now;
     u.last_deny = false;
