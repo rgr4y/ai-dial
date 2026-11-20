@@ -42,7 +42,7 @@ component) for the Mac with ESPHome's `host` platform, drawing into an SDL windo
 - **Pin a scenario:** while `../build/sim-pin.jsonl` exists, the sim ignores the bridge and plays that file: one
   `buddy_line` JSON per line (docs/DIAL-PROTOCOL.md), all lines when the file changes, heartbeats again every 5 s.
   Delete it to hand back to the bridge. E.g. a busy Grok bot:
-  `{"total":1,"running":1,"waiting":0,"msg":"busy","entries":[],"avatar":"teardrop","avatar_color":16721468,"avatar_name":"3DBot","bots":[["teardrop",16721468,"3DBot"]]}`
+  `{"total":1,"running":1,"waiting":0,"msg":"busy","avatar":"teardrop","avatar_color":16721468,"avatar_name":"3DBot","bots":[["teardrop",16721468,"3DBot"]]}`
 
 ## Voice
 

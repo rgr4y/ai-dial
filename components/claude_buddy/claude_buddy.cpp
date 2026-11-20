@@ -63,9 +63,6 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     s.running = doc["running"] | 0u;
     s.waiting = doc["waiting"] | 0u;
     s.msg = doc["msg"] | "";
-    s.entries.clear();
-    for (JsonVariant e : doc["entries"].as<JsonArray>())
-      s.entries.emplace_back(e | "");
     s.usage = doc["usage"] | "";
     s.usage_pct = doc["usage_pct"] | 0u;
     s.usages.clear();

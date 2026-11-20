@@ -52,7 +52,6 @@ struct UsageCard {
 struct Snapshot {
   uint32_t total = 0, running = 0, waiting = 0;
   std::string msg;
-  std::vector<std::string> entries;  // newest first
   std::string prompt_id, prompt_tool, prompt_hint;  // prompt_id empty = no permission pending
   std::string usage;      // plan usage line from the bridge, e.g. "5h 15% · wk 19% · 2h 41m"
   uint32_t usage_pct = 0; // the higher of the 5-hour and weekly utilisation

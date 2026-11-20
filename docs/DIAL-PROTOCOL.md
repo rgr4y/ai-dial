@@ -37,7 +37,6 @@ Each line is one Claude desktop Hardware Buddy JSON object
   silence as offline.
   ```json
   {"total":2,"running":1,"waiting":1,"msg":"approve: Bash",
-   "entries":["07:42 api: Bash npm test","07:41 api: prompt"],
    "prompt":{"id":"p3-mwm6…","tool":"Bash","hint":"api: rm -rf /tmp/x"}}
   ```
   `prompt` is the oldest waiting permission. It is absent when nothing is waiting.

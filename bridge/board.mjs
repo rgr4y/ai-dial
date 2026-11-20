@@ -13,7 +13,7 @@ export const FORGET_MS = 6 * 60 * 60 * 1000; // dropped entirely after this
 const WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',
                                 'SubagentStart', 'SubagentStop', 'PreCompact', 'GrokPermissionResolved']);
 
-// One-line summary of a tool call for the permission screen and the entries list.
+// One-line summary of a tool call for the permission screen.
 export function summarize(tool, input) {
   if (!input || typeof input !== 'object') return tool || '';
   const v = input.command ?? input.file_path ?? input.path ?? input.url ?? input.pattern ?? input.query
@@ -23,12 +23,9 @@ export function summarize(tool, input) {
   return s.length > 120 ? s.slice(0, 119) + '…' : s;
 }
 
-const hhmm = (ms) => new Date(ms).toTimeString().slice(0, 5);
-
 export class Board {
   constructor() {
     this.sessions = new Map(); // session_id -> { id, born, project, status, at, tool, hint, prompt, tty }
-    this.entries = [];         // newest first, "HH:MM project: what"
     this.seq = 0;
   }
 
@@ -47,11 +44,6 @@ export class Board {
     s.at = now;
     s.promptOnly = false;
     return s;
-  }
-
-  _entry(now, project, what) {
-    this.entries.unshift(`${hhmm(now)} ${project}: ${what}`.slice(0, 80));
-    this.entries.length = Math.min(this.entries.length, 5);
   }
 
   // The terminal device (`ttys003`) a session's hooks ran in, if hook.sh saw one. Voice types into it.
@@ -84,23 +76,16 @@ export class Board {
     if (name === 'GrokPermissionPending') {
       s.status = 'waiting';
       s.pending = { tool: ev.tool_name || 'tool', hint: summarize(ev.tool_name, ev.tool_input), at: now };
-      this._entry(now, s.project, `asks ${s.pending.tool}`);
     } else if (WORKING_EVENTS.has(name)) {
       s.status = 'working';
       if (ev.tool_name) {
         s.tool = ev.tool_name;
         s.hint = summarize(ev.tool_name, ev.tool_input);
       }
-      if (name === 'UserPromptSubmit') {
-        s.tool = '';
-        this._entry(now, s.project, 'prompt');
-      } else if (name === 'PreToolUse') {
-        this._entry(now, s.project, `${ev.tool_name} ${s.hint}`.trim());
-      }
+      if (name === 'UserPromptSubmit') s.tool = '';
     } else if (name === 'Stop') {
       s.status = 'idle';
       s.tool = '';
-      this._entry(now, s.project, 'done');
       const text = plainText(ev.last_assistant_message || '');
       if (text) {
         out.turn = `${s.project}: ${text}`;
@@ -125,7 +110,6 @@ export class Board {
     const id = `p${++this.seq}-${now.toString(36)}`;
     s.status = 'waiting';
     s.prompt = { id, tool: ev.tool_name || 'tool', hint: `${s.project}: ${summarize(ev.tool_name, ev.tool_input)}`, at: now };
-    this._entry(now, s.project, `asks ${s.prompt.tool}`);
     return id;
   }
 
@@ -164,7 +148,7 @@ export class Board {
       id: s.id, name: s.project, tool: s.tool, ...(s.agent && { agent: s.agent }),
       ...(s.avatar && { avatar: s.avatar, avatar_color: s.avatar_color }) }));
     const hb = { total: all.length, running: working.length, waiting: waiting.length, msg: '',
-                 entries: this.entries, ...(pend.length && { watching: pend.length }),
+                 ...(pend.length && { watching: pend.length }),
                  ...(work.length && { work, latest: working[0].id }) };
     if (waiting.length) {
       const p = waiting[0].prompt;

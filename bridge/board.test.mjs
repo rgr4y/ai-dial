@@ -15,7 +15,6 @@ test('a prompt makes the session working, Stop makes it idle with a turn', () =>
   const hb = b.heartbeat(3000);
   assert.equal(hb.running, 0);
   assert.equal(hb.total, 1);
-  assert.match(hb.entries[0], /proj: done$/);
 });
 
 test('permission prompt shows in the heartbeat and closes on answer or on a later event', () => {
