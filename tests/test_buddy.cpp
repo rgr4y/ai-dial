@@ -34,5 +34,13 @@ int main() {
   alert.layers = {bubble};
   assert(layer_pos(alert, work, 4, 0, 0).x == 175 - 31 && layer_pos(alert, work, 4, 0, 0).y == 175 - 21);
 
+  // IMU gaze: only the eyes layer moves, and its scripted glance comes out while the IMU steers.
+  work.gaze.layer = 1;
+  work.gaze.look = {4};
+  Pt eyes = layer_pos(work, work, 4, 1, 0);
+  assert(gazed(work, eyes, 1, 0, 3, -2).x == eyes.x - 4 + 3 && gazed(work, eyes, 1, 0, 3, -2).y == eyes.y - 2);
+  assert(gazed(work, layer_pos(work, work, 4, 0, 0), 0, 0, 3, -2).x == layer_pos(work, work, 4, 0, 0).x);
+  assert(gazed(work, eyes, 1, 5, 3, 0).x == eyes.x + 3);  // no look entry for that step: no glance to remove
+
   puts("scene ok");
 }

@@ -1,7 +1,7 @@
 #pragma once
 // The Harness "Focus face", driven by the Claude Hardware Buddy protocol instead of the Harness cable.
 // Layout, inks, strings and timings follow docs/HARNESS-UI-SPEC.md (section numbers in comments).
-// One screen: name on the top arc, a pet scene or the small pet + card in the middle, status on the lower arc.
+// One screen: name on the top arc, a pet scene or Dismiss + card in the middle, status on the lower arc.
 // Views are instant swaps (spec §2 Common: no fades). Everything runs on the ESPHome main loop.
 #include <algorithm>
 #include <cmath>
@@ -29,6 +29,11 @@ using esphome::claude_buddy::ClaudeBuddy;
 static constexpr uint32_t TEXT = 0xefe7de, SECONDARY = 0xada6ad, ACCENT = 0xc6aaef, SELECTION = 0x392c4a,
                           ERROR = 0xe7a6ad, NAME = 0xeaeaf0, RECAP = 0xd6d6d2, CARD = 0x1c1e26, CARD_RIM = 0x3d3f47,
                           RELAX_LINE = 0x9a9aa6, LIVE = 0x00ff2f, BLUE = 0x006fff;
+// Buttons (mk_button): filled, so they don't read as cards. Fill / label per kind; pressed darkens the fill.
+// Primary: the default action (Dismiss). Warning: needs a second thought. Error: cancel, deny, destructive.
+enum class Btn { PRIMARY, WARNING, ERROR };
+struct BtnInk { uint32_t fill, text; };
+static constexpr BtnInk BTN_INK[] = {{0x7c5cc4, 0xffffff}, {0xd9902f, 0x1a1206}, {0xc94a5a, 0xffffff}};
 
 // AI provider colours, picked to read on black. Brand-derived: Claude terracotta, Copilot the light end of the
 // Microsoft 365 blue, Codex OpenAI green. Grok's brand is black and white, so a cool silver that still differs
@@ -77,7 +82,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   int card_lines = 0;  // recap card height in lines (1-4), set when its text changes
   bool card_overflow = false, card_manual = false;  // text past 4 lines; finger has taken over the scroll
   uint32_t card_manual_at = 0;                      // last touch / scroll movement while manual
-  lv_obj_t *small = nullptr, *card = nullptr, *card_text = nullptr, *bell = nullptr, *bell_text = nullptr;
+  lv_obj_t *dismiss = nullptr, *card = nullptr, *card_text = nullptr, *bell = nullptr, *bell_text = nullptr;
   lv_obj_t *word = nullptr, *sub = nullptr;                                  // brand (bridge offline)
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
   lv_obj_t *btn_deny = nullptr, *btn_allow = nullptr;
@@ -114,8 +119,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   uint32_t recap_cleared = 0;         // turn text at or before this is not shown
   uint32_t sent_at = 0;               // claude_send plays until sent_at + SEND_MS
   const char *hint = "What's next?";
-  lv_obj_t *shield = nullptr;          // while dark: eats touches so a wake tap can't hit [ allow ]
-  bool small_was = false;
+  lv_obj_t *shield = nullptr;          // while dark: eats touches so a wake tap can't hit Allow
   std::function<int()> battery;       // YAML: battery % when a cell is connected (also while charging), -1 otherwise
   std::function<bool()> on_usb;       // YAML: true when VBUS is present; unset = battery rules
   bool was_live = false;               // the bridge has talked since boot (splash says "offline", not "looking")
@@ -125,8 +129,6 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   std::string last_state;
   bool shimmer = false;   // lower-arc status shimmer on (the working line)
   uint8_t shimmer_phase = 0;
-  uint32_t small_t0 = 0;
-  const std::vector<const lv_image_dsc_t *> *small_set = nullptr;
 };
 
 inline Ui &ui() {
@@ -169,12 +171,12 @@ inline lv_obj_t *mk_arc(lv_obj_t *parent, const lv_font_t *font, bool top) {
   lv_arclabel_set_text_horizontal_align(a, LV_ARCLABEL_TEXT_ALIGN_CENTER);
   lv_arclabel_set_text_vertical_align(a, LV_ARCLABEL_TEXT_ALIGN_CENTER);
   lv_arclabel_set_overflow(a, LV_ARCLABEL_OVERFLOW_ELLIPSIS);
-  lv_obj_remove_flag(a, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(a, false);
   return a;
 }
 inline void show(lv_obj_t *o, bool on) {
-  if (lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN) == on)
-    (on ? lv_obj_remove_flag : lv_obj_add_flag)(o, LV_OBJ_FLAG_HIDDEN);
+  if (lv_obj_is_hidden(o) == on)
+    lv_obj_set_hidden(o, !on);
 }
 // Set label text only when it changed: unchanged text would still redraw every second.
 inline void set_text(lv_obj_t *l, const char *t) {
@@ -197,22 +199,32 @@ inline lv_obj_t *mk_card(lv_obj_t *parent) {
   lv_obj_set_height(c, LV_SIZE_CONTENT);
   return c;
 }
-// "[ label ]" control in Inter 25 (spec §2.8). Pressed: accent ink on the selection colour.
-inline lv_obj_t *mk_control(lv_obj_t *parent, const lv_font_t *font, const char *text, uint32_t ink, int x, int y,
-                            int w) {
+// Pill button sized to its label plus padding, centred across the screen (set_y places it). Filled in its kind's
+// colour; pressed: darker and a touch smaller. A styled lv_obj: lv_button is the same object plus theme styles, and
+// ESPHome compiles it out (LV_USE_BUTTON 0) unless a YAML widget uses it.
+inline lv_obj_t *mk_button(lv_obj_t *parent, const lv_font_t *font, const char *text, Btn kind = Btn::PRIMARY) {
+  const BtnInk &ink = BTN_INK[(int) kind];
   lv_obj_t *b = lv_obj_create(parent);
   lv_obj_remove_style_all(b);
-  lv_obj_set_pos(b, x, y - 20);
-  lv_obj_set_size(b, w, 66);  // hit box: label plus margin, 66 px tall (ui_habitat.c:907-922)
-  lv_obj_set_style_radius(b, 33, 0);
-  lv_obj_set_style_bg_color(b, lv_color_hex(SELECTION), LV_STATE_PRESSED);
-  lv_obj_set_style_bg_opa(b, LV_OPA_COVER, LV_STATE_PRESSED);
-  lv_obj_t *l = mk_label(b, font, ink);
-  lv_obj_set_style_text_color(l, lv_color_hex(ACCENT), LV_STATE_PRESSED);
+  lv_obj_set_size(b, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+  lv_obj_set_align(b, LV_ALIGN_TOP_MID);
+  lv_obj_set_style_pad_hor(b, 36, 0);
+  lv_obj_set_style_pad_ver(b, 14, 0);
+  lv_obj_set_style_radius(b, LV_RADIUS_CIRCLE, 0);
+  lv_obj_set_style_bg_color(b, lv_color_hex(ink.fill), 0);
+  lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
+  lv_obj_set_style_bg_color(b, lv_color_darken(lv_color_hex(ink.fill), LV_OPA_30), LV_STATE_PRESSED);
+  lv_obj_set_style_text_color(b, lv_color_hex(ink.text), 0);  // on the button: the label inherits it
+  lv_obj_set_style_text_font(b, font, 0);
+  lv_obj_set_style_transform_scale(b, 240, LV_STATE_PRESSED);  // 256 = 1x
+  lv_obj_set_ext_click_area(b, 12);
+  lv_obj_set_clickable(b, true);
+  lv_obj_t *l = lv_label_create(b);
   lv_label_set_text(l, text);
-  lv_obj_center(l);
-  lv_obj_add_flag(l, LV_OBJ_FLAG_EVENT_BUBBLE);
-  lv_obj_add_flag(b, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_event_bubble(l, true);
+  lv_obj_update_layout(b);  // size known now: pivot for the press scale, height for the caller's placement
+  lv_obj_set_style_transform_pivot_x(b, lv_obj_get_width(b) / 2, 0);
+  lv_obj_set_style_transform_pivot_y(b, lv_obj_get_height(b) / 2, 0);
   return b;
 }
 // Elapsed: "0:34", "1:05", "1h 5m", "2d 3h" (focus.c:742).
@@ -339,7 +351,7 @@ inline void splash_in() {
 // Published when it changes, on the buddy_ui text sensor (the bridge reads the view from it) and in the log.
 inline void publish_state() {
   Ui &u = ui();
-  auto vis = [](lv_obj_t *o) { return o && !lv_obj_has_flag(o, LV_OBJ_FLAG_HIDDEN); };
+  auto vis = [](lv_obj_t *o) { return o && !lv_obj_is_hidden(o); };
   auto hex = [](uint32_t c) { char b[8]; snprintf(b, sizeof(b), "#%06x", (unsigned) c); return std::string(b); };
   JsonDocument d;
   d["v"] = 1;
@@ -354,7 +366,6 @@ inline void publish_state() {
   if (u.alert.sc) d["alert"] = lv_label_get_text(u.alert.count);
   if (vis(u.card)) {
     d["card"] = lv_label_get_text(u.card_text);
-    d["small"] = u.small_set == &character::pack().small.z6 ? 6 : 4;
   }
   if (vis(u.bell)) d["bell"] = lv_label_get_text(u.bell_text);
   if (vis(u.word)) d["word"] = lv_label_get_text(u.word);
@@ -410,10 +421,10 @@ inline void on_root(lv_event_t *e) {
   update(now);
 }
 inline void on_card(lv_event_t *) { tap("card"); }
-// Double tap on the small Clawd above the reply: done with it, same as a card tap. The reply goes and the face
-// shows what's current: the working face if a turn started while reading, else home.
-// LVGL's streak window is the long-press time (650 ms, lv_indev.c indev_proc_short_click).
-inline void on_small(lv_event_t *) {
+// Dismiss above the reply: done with it, same as a card tap. The reply goes and the face shows what's current:
+// the working face if a turn started while reading, else home. One tap (the old double tap on the small Clawd was
+// hard to land).
+inline void on_dismiss(lv_event_t *) {
   ui().card_manual = false;
   tap("card");
 }
@@ -499,8 +510,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.buddy = buddy;
   u.f = fonts;
   lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
-  lv_obj_remove_flag(root, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(root, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_scrollable(root, false);
+  lv_obj_set_clickable(root, true);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_LONG_PRESSED, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_GESTURE, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_SHORT_CLICKED, nullptr);
@@ -512,17 +523,14 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.scene.create(root);
   u.alert.create(root, true);
   lv_obj_set_style_text_font(u.alert.count, u.f.f26m, 0);
-  lv_obj_add_flag(u.alert.layer[0], LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(u.alert.layer[0], true);
   lv_obj_set_ext_click_area(u.alert.layer[0], 14);  // bubble tap margin (ui_habitat.c:1206)
   lv_obj_add_event_cb(u.alert.layer[0], on_reopen, LV_EVENT_CLICKED, nullptr);
 
-  u.small = lv_image_create(root);
-  lv_obj_add_flag(u.small, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(u.small, LV_OBJ_FLAG_EVENT_BUBBLE);  // press / hold still reach on_root
-  lv_obj_set_ext_click_area(u.small, 30);  // card is on top where they overlap; a card tap also dismisses
-  lv_obj_add_event_cb(u.small, on_small, LV_EVENT_DOUBLE_CLICKED, nullptr);
+  u.dismiss = mk_button(root, u.f.f25, "Dismiss");
+  lv_obj_add_event_cb(u.dismiss, on_dismiss, LV_EVENT_CLICKED, nullptr);
   u.card = mk_card(root);
-  lv_obj_add_flag(u.card, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_clickable(u.card, true);
   lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
   u.card_text = mk_label(u.card, u.f.f30, RECAP);
   lv_obj_set_width(u.card_text, 348);  // card 368 - 2 x 10 pad
@@ -530,32 +538,34 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
   lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
   // Drag target: it must be the pressed object for the indev to scroll it. EVENT_BUBBLE passes CLICKED up to u.card.
-  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_CLICKABLE);  // one flag per call: C++ won't take an OR'd int as lv_obj_flag_t
-  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_SCROLLABLE);
-  lv_obj_add_flag(u.card_text, LV_OBJ_FLAG_EVENT_BUBBLE);
-  lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_ELASTIC);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
+  lv_obj_set_clickable(u.card_text, true);
+  lv_obj_set_scrollable(u.card_text, true);
+  lv_obj_set_event_bubble(u.card_text, true);
+  lv_obj_set_scroll_elastic(u.card_text, false);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
   lv_obj_set_scroll_dir(u.card_text, LV_DIR_VER);
   // Vertical only: text 348 > card content 344 (border counts), so a sideways drag chained up and slid the card.
-  lv_obj_remove_flag(u.card_text, LV_OBJ_FLAG_SCROLL_CHAIN_HOR);
-  lv_obj_remove_flag(u.card, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_scroll_chain_hor(u.card_text, false);
+  lv_obj_set_scrollable(u.card, false);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_PRESSED, nullptr);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_SCROLL, nullptr);
   lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_RELEASED, nullptr);
   lv_obj_center(u.card_text);
 
-  // Bell pill (spec §2.6): 0x006fff, 32 px tall, fully rounded, centred at y 400.
+  // Bell pill (spec §2.6 colour, 0x006fff, fully rounded): 54 px tall in Inter 25 (spec: 32 / 20, too small a tap),
+  // centred at y 388 so its corners stay inside the glass.
   u.bell = lv_obj_create(root);
   lv_obj_remove_style_all(u.bell);
   lv_obj_set_style_bg_color(u.bell, lv_color_hex(BLUE), 0);
   lv_obj_set_style_bg_opa(u.bell, LV_OPA_COVER, 0);
   lv_obj_set_style_radius(u.bell, LV_RADIUS_CIRCLE, 0);
-  lv_obj_set_style_pad_hor(u.bell, 13, 0);
-  lv_obj_set_size(u.bell, LV_SIZE_CONTENT, 32);
-  lv_obj_align(u.bell, LV_ALIGN_TOP_MID, 0, 400 - 16);
-  lv_obj_add_flag(u.bell, LV_OBJ_FLAG_CLICKABLE);
+  lv_obj_set_style_bg_color(u.bell, lv_color_darken(lv_color_hex(BLUE), LV_OPA_30), LV_STATE_PRESSED);
+  lv_obj_set_style_pad_hor(u.bell, 34, 0);
+  lv_obj_set_size(u.bell, LV_SIZE_CONTENT, 54);
+  lv_obj_align(u.bell, LV_ALIGN_TOP_MID, 0, 388 - 27);
+  lv_obj_set_clickable(u.bell, true);
   lv_obj_set_ext_click_area(u.bell, 20);
   lv_obj_add_event_cb(u.bell, on_reopen, LV_EVENT_CLICKED, nullptr);
-  u.bell_text = mk_label(u.bell, u.f.f20, NAME);
+  u.bell_text = mk_label(u.bell, u.f.f25, NAME);
   lv_obj_center(u.bell_text);
 
   // Brand / pairing (spec §5): wordmark "Claude" in Inter Bold 48 on a 50 px line at y 208.
@@ -573,7 +583,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
     lv_obj_remove_style_all(o);
     lv_obj_set_style_radius(o, LV_RADIUS_CIRCLE, 0);
     lv_obj_set_style_bg_color(o, lv_color_hex(LIVE), 0);
-    lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_set_clickable(o, false);
     show(o, false);
   }
   u.alarm = mk_label(root, u.f.f96b, USAGE_HOT);
@@ -586,8 +596,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.perm = lv_obj_create(root);
   lv_obj_remove_style_all(u.perm);
   lv_obj_set_size(u.perm, scene::W, scene::W);
-  lv_obj_add_flag(u.perm, LV_OBJ_FLAG_EVENT_BUBBLE);  // gestures reach root
-  lv_obj_remove_flag(u.perm, LV_OBJ_FLAG_SCROLLABLE);
+  lv_obj_set_event_bubble(u.perm, true);  // gestures reach root
+  lv_obj_set_scrollable(u.perm, false);
   u.perm_title = mk_label(u.perm, u.f.f30, NAME);
   lv_obj_set_width(u.perm_title, 330);
   lv_label_set_long_mode(u.perm_title, LV_LABEL_LONG_MODE_DOTS);
@@ -599,8 +609,12 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_align(u.perm_hint, LV_ALIGN_TOP_MID, 0, 190);
   u.perm_count = mk_label(u.perm, u.f.f20, SECONDARY);
   lv_obj_align(u.perm_count, LV_ALIGN_TOP_MID, 0, 290);
-  u.btn_deny = mk_control(u.perm, u.f.f25, "[ deny ]", ERROR, 83, 355, 156);
-  u.btn_allow = mk_control(u.perm, u.f.f25, "[ allow ]", TEXT, 243, 355, 140);
+  // Deny | Allow: centres 78 px either side of the middle, row centred on y 352 (clear of the status arc below
+  // and the "n of m waiting" count at y 290 above).
+  u.btn_deny = mk_button(u.perm, u.f.f25, "Deny", Btn::ERROR);
+  u.btn_allow = mk_button(u.perm, u.f.f25, "Allow", Btn::PRIMARY);
+  lv_obj_set_pos(u.btn_deny, -78, 352 - lv_obj_get_height(u.btn_deny) / 2);
+  lv_obj_set_pos(u.btn_allow, 78, 352 - lv_obj_get_height(u.btn_allow) / 2);
   lv_obj_add_event_cb(u.btn_deny, on_decide, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(u.btn_allow, on_decide, LV_EVENT_CLICKED, nullptr);
 
@@ -608,27 +622,27 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.list = lv_obj_create(root);
   lv_obj_remove_style_all(u.list);
   lv_obj_set_size(u.list, scene::W, scene::W);
-  lv_obj_add_flag(u.list, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_set_event_bubble(u.list, true);
   u.list_text = mk_label(u.list, u.f.f25, TEXT);
   lv_obj_set_width(u.list_text, 340);
   lv_obj_set_style_text_align(u.list_text, LV_TEXT_ALIGN_LEFT, 0);
   lv_label_set_long_mode(u.list_text, LV_LABEL_LONG_MODE_WRAP);
   lv_obj_align(u.list_text, LV_ALIGN_TOP_MID, 0, 96);
-  lv_obj_add_flag(u.list_text, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_set_event_bubble(u.list_text, true);
 
   // Usage screen (BOOT): children made by build_usage().
   u.usage = lv_obj_create(root);
   lv_obj_remove_style_all(u.usage);
   lv_obj_set_size(u.usage, scene::W, scene::W);
-  lv_obj_add_flag(u.usage, LV_OBJ_FLAG_EVENT_BUBBLE);
-  lv_obj_add_flag(u.usage, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_event_bubble(u.usage, true);
+  lv_obj_set_hidden(u.usage, true);
 
   // Battery page (BOOT, after usage): ring + big %, values set in update().
   u.battery_page = lv_obj_create(root);
   lv_obj_remove_style_all(u.battery_page);
   lv_obj_set_size(u.battery_page, scene::W, scene::W);
-  lv_obj_add_flag(u.battery_page, LV_OBJ_FLAG_EVENT_BUBBLE);
-  lv_obj_add_flag(u.battery_page, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_event_bubble(u.battery_page, true);
+  lv_obj_set_hidden(u.battery_page, true);
   u.battery_ring = lv_arc_create(u.battery_page);
   lv_obj_set_size(u.battery_ring, 340, 340);  // outer radius 170: arc-label glyphs reach in to ~185
   lv_obj_center(u.battery_ring);
@@ -639,8 +653,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(CARD_RIM), LV_PART_MAIN);
   lv_obj_remove_style(u.battery_ring, nullptr, LV_PART_KNOB);
-  lv_obj_remove_flag(u.battery_ring, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(u.battery_ring, LV_OBJ_FLAG_EVENT_BUBBLE);
+  lv_obj_set_clickable(u.battery_ring, false);
+  lv_obj_set_event_bubble(u.battery_ring, true);
   u.battery_num = mk_label(u.battery_page, u.f.f96b, TEXT);
   lv_obj_center(u.battery_num);
 
@@ -648,7 +662,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.ota_page = lv_obj_create(root);
   lv_obj_remove_style_all(u.ota_page);
   lv_obj_set_size(u.ota_page, scene::W, scene::W);
-  lv_obj_add_flag(u.ota_page, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(u.ota_page, true);
   u.ota_pct = mk_label(u.ota_page, u.f.f96b, TEXT);
   lv_label_set_text(u.ota_pct, "0%");
   lv_obj_align(u.ota_pct, LV_ALIGN_CENTER, 0, -30);
@@ -675,21 +689,21 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_arclabel_set_angle_size(u.bat_arc, 60);
   arc_band(u.bat_arc, 0, 100, 100, 266);  // r 205 at 150..210 deg: x ~12-72, y ~114-352
   lv_arclabel_set_recolor(u.bat_arc, true);  // per-letter colour for the charging shimmer
-  lv_obj_add_flag(u.bat_arc, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_hidden(u.bat_arc, true);
   // Charging bolt after the side %: a stroked zigzag (Inter has no bolt glyph), turned to follow the arc text.
   u.bat_bolt = lv_line_create(root);
   lv_obj_set_style_line_width(u.bat_bolt, 4, 0);
   lv_obj_set_style_line_rounded(u.bat_bolt, true, 0);
   lv_obj_set_style_line_color(u.bat_bolt, lv_color_hex(LIVE), 0);
-  lv_obj_remove_flag(u.bat_bolt, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(u.bat_bolt, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(u.bat_bolt, false);
+  lv_obj_set_hidden(u.bat_bolt, true);
   // Shield last = topmost. Hidden while awake; while dark it takes the touch and only wakes the screen
   // (touch_habitat.c:133-138 swallows the wake contact the same way).
   u.shield = lv_obj_create(root);
   lv_obj_remove_style_all(u.shield);
   lv_obj_set_size(u.shield, scene::W, scene::W);
-  lv_obj_add_flag(u.shield, LV_OBJ_FLAG_CLICKABLE);
-  lv_obj_add_flag(u.shield, LV_OBJ_FLAG_HIDDEN);
+  lv_obj_set_clickable(u.shield, true);
+  lv_obj_set_hidden(u.shield, true);
   lv_obj_add_event_cb(u.shield, [](lv_event_t *) { activity(lv_tick_get()); }, LV_EVENT_PRESSED, nullptr);
 
   pick_hint();
@@ -698,24 +712,10 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   update(u.last_activity);
 }
 
-// Small pet above a card, centred between the name's foot (y 66) and the card top (focus.c:925-944).
-inline void place_small(int card_top, bool big, uint32_t now) {
-  Ui &u = ui();
-  const scene::Small &sm = character::pack().small;
-  u.small_set = big ? &sm.z6 : &sm.z4;
-  if (u.small_set->empty() || sm.loop.empty()) {  // no pack on flash yet
-    show(u.small, false);
-    return;
-  }
-  if (!u.small_was) u.small_t0 = now;
-  u.small_was = true;
-  show(u.small, true);
-  const auto &st = sm.loop[((now - u.small_t0) / sm.step_ms) % sm.loop.size()];
-  const lv_image_dsc_t *img = (*u.small_set)[std::min<size_t>(st[0], u.small_set->size() - 1)];
-  lv_image_set_src(u.small, img);
-  int z = big ? 6 : 4;
-  lv_obj_set_pos(u.small, (scene::W - (int) img->header.w) / 2,
-                 66 + (card_top - 66 - (int) img->header.h) / 2 + st[1] * z / 4);
+// Dismiss centred between the name's foot (y 66) and the card top.
+inline void place_dismiss(int card_top) {
+  lv_obj_t *d = ui().dismiss;
+  lv_obj_set_y(d, 66 + (card_top - 66 - lv_obj_get_height(d)) / 2);
 }
 
 inline void card_scroll_y(void *o, int32_t y) { lv_obj_scroll_to_y((lv_obj_t *) o, y, LV_ANIM_OFF); }
@@ -779,7 +779,7 @@ inline void show_card(const std::string &text, uint32_t now) {
   int h = u.card_lines * 43 + 2 * 21;
   int top = 176 + (200 - h) / 2;  // centred in y 176-376 (focus.c:49-56)
   lv_obj_set_y(u.card, top);
-  place_small(top, u.card_lines <= 3, now);
+  place_dismiss(top);
 }
 
 // Usage screen layout: per provider its name, then a row per rate window: label,
@@ -795,7 +795,7 @@ inline void build_usage() {
     lv_obj_set_width(l, w);
     lv_obj_set_style_text_align(l, al, 0);
     lv_obj_set_pos(l, x, cy - lv_font_get_line_height(f) / 2);
-    lv_obj_add_flag(l, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_event_bubble(l, true);
   };
   auto bar = [&](int x, int cy, int w, uint32_t col) {
     lv_obj_t *b = lv_obj_create(u.usage);
@@ -805,7 +805,7 @@ inline void build_usage() {
     lv_obj_set_style_radius(b, 5, 0);
     lv_obj_set_style_bg_color(b, lv_color_hex(col), 0);
     lv_obj_set_style_bg_opa(b, LV_OPA_COVER, 0);
-    lv_obj_add_flag(b, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_event_bubble(b, true);
     return b;
   };
   if (cards.empty()) {
@@ -919,14 +919,13 @@ inline void update(uint32_t now) {
     Ui &u;
     lv_obj_t *o[11];
     bool want[11] = {};
-    explicit Vis(Ui &ui_) : u(ui_), o{ui_.small, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
+    explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
     void on(lv_obj_t *x) {
       for (int i = 0; i < 11; i++)
         if (o[i] == x) want[i] = true;
     }
     ~Vis() {
       for (int i = 0; i < 11; i++) show(o[i], want[i]);
-      u.small_was = want[0];
       publish_state();
     }
   } vis{u};
@@ -1027,6 +1026,13 @@ inline void update(uint32_t now) {
   // ---- FACE (spec §2.9) ----
   const esphome::claude_buddy::Bot *shown = nullptr;  // a Grok bot on the face instead of Clawd: its name tops the face
   bool recap = !running && !b->last_text().empty() && b->last_text_ms() > u.recap_cleared;
+  // The reply card names whoever wrote it: a Grok bot (its name, in its colour), Codex, Copilot, else Claude.
+  auto reply_by = [&]() {
+    const auto &bot = b->last_bot();
+    if (!bot.shape.empty()) shown = &bot;
+    else if (b->last_agent() == "codex") name = "Codex";
+    else if (b->last_agent() == "copilot") name = "Copilot";
+  };
   bool waiting = s.waiting > 0;  // only reachable here once the prompt was put off
   // Finger still on the reply (scrolled within CARD_MANUAL_MS): keep it up through a new turn; tick() hands back.
   bool reading = u.card_manual && (now - u.card_manual_at < CARD_MANUAL_MS ||
@@ -1042,14 +1048,21 @@ inline void update(uint32_t now) {
     u.scene.stop();
     u.alert.stop();
     vis.on(u.card);
-    vis.on(u.small);
+    vis.on(u.dismiss);
+    reply_by();
   } else if (running) {
-    // A busy Grok Bot session shows its own bot (bridge heartbeat `avatar`), else Clawd cooks or builds.
+    // A busy Grok Bot session shows its own bot (bridge heartbeat `avatar`), Codex and Copilot their pets (`agent`),
+    // else Clawd cooks or builds.
     const scene::Scene *sc = s.avatar.shape.empty() ? nullptr : character::find(("grok_" + s.avatar.shape).c_str());
+    const char *agent = s.agent == "codex" ? "Codex" : s.agent == "copilot" ? "Copilot" : nullptr;
+    const scene::Scene *cx = agent ? character::find((s.agent + "_work").c_str()) : nullptr;
     if (sc) {
       u.scene.play(sc, now, 4);
       u.scene.set_tint(s.avatar.rgb);
       shown = &s.avatar;
+    } else if (cx) {
+      u.scene.play(sc = cx, now, 4);
+      name = agent;
     } else {
       sc = u.build ? character::find("build") : character::find("work");
       u.scene.play(sc, now, 4);
@@ -1076,19 +1089,34 @@ inline void update(uint32_t now) {
     u.scene.stop();
     u.alert.stop();
     vis.on(u.card);
-    vis.on(u.small);
+    vis.on(u.dismiss);
+    reply_by();
     show_card(cut(one_line(b->last_text()), RECAP_MAX), now);
     arc_text(u.status_arc, "", RELAX_LINE);
   } else {
     u.alert.stop();
-    // Idle: Clawd juggles, then each known Grok bot gets a turn, switching as each usage flash starts.
-    const scene::Scene *sc = character::find("relax");
-    size_t n = live ? s.bots.size() + 1 : 1, k = now / USAGE_EVERY_MS % n;
-    const scene::Scene *bot = k ? character::find(("grok_" + s.bots[k - 1].shape).c_str()) : nullptr;
-    u.scene.play(bot ? bot : sc, now, 4);
+    // Idle: providers take turns, switching as each usage flash starts: Clawd juggles, Codex's pet and Copilot's head
+    // relax, Grok shows its next bot (one bot per Grok turn, so a long roster can't crowd the others out).
+    static const char *const PETS[][2] = {{"codex_relax", "Codex"}, {"copilot_relax", "Copilot"}};
+    const scene::Scene *pets[3] = {character::find("relax")};
+    const char *names[3] = {nullptr};
+    uint32_t n = 1;
+    for (const auto &pet : PETS)  // a pet's _xl (Copilot's head, scripts/anim/copilot.mjs) fills the face
+      if ((pets[n] = character::find((std::string(pet[0]) + "_xl").c_str())) || (pets[n] = character::find(pet[0])))
+        names[n++] = pet[1];
+    bool grok = live && !s.bots.empty();
+    uint32_t turn = now / USAGE_EVERY_MS, providers = n + grok, p = turn % providers;
+    if (grok && b->mute_api) p = n;  // sim pin (scripts/sim-panel.mjs): a pinned roster shows only its bots
+    const esphome::claude_buddy::Bot *g = grok && p == n ? &s.bots[turn / providers % s.bots.size()] : nullptr;
+    const scene::Scene *bot = g ? character::find(("grok_" + g->shape).c_str()) : nullptr;
     if (bot) {
-      u.scene.set_tint(s.bots[k - 1].rgb);
-      shown = &s.bots[k - 1];
+      u.scene.play(bot, now, 4);
+      u.scene.set_tint(g->rgb);
+      shown = g;
+    } else {
+      if (p >= n) p = 0;  // a bot whose shape isn't in the pack: Clawd covers its turn
+      u.scene.play(pets[p], now, 4);
+      if (names[p]) name = names[p];
     }
     arc_text(u.status_arc, waiting ? "" : u.hint, RELAX_LINE);  // hint left out while the bell shows
   }
@@ -1199,18 +1227,14 @@ inline void tick(uint32_t now) {
       shimmer_paint(u.status_arc, u.arc_txt[1], u.arc_col[1], ph);
     }
   }
-  if (!u.asleep && !lv_obj_has_flag(u.alarm, LV_OBJ_FLAG_HIDDEN)) {
+  if (!u.asleep && !lv_obj_is_hidden(u.alarm)) {
     // Bounce in, pulse twice a second, bounce out, across the 3 s usage flash. 256 = 1x.
     uint32_t t = now % USAGE_EVERY_MS;
     float env = std::min(1.0f, std::min(t / 250.0f, (USAGE_SHOW_MS - (float) std::min(t, USAGE_SHOW_MS)) / 250.0f));
     float k = env * (1.0f + 0.15f * sinf(t * 2 * 3.14159f / 500));
     lv_obj_set_style_transform_scale(u.alarm, (int32_t) (256 * k), 0);
   }
-  if (!u.asleep && !lv_obj_has_flag(u.small, LV_OBJ_FLAG_HIDDEN) && u.small_set) {
-    lv_obj_update_layout(u.card);
-    place_small(lv_obj_get_y(u.card), u.small_set == &character::pack().small.z6, now);
-  }
-  if (u.card_manual && !u.asleep && !lv_obj_has_flag(u.card, LV_OBJ_FLAG_HIDDEN) && now - u.card_manual_at >= CARD_MANUAL_MS &&
+  if (u.card_manual && !u.asleep && !lv_obj_is_hidden(u.card) && now - u.card_manual_at >= CARD_MANUAL_MS &&
       lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED) {
     resume_card_anim();
     update(now);  // a turn that started while reading takes the face now

@@ -40,7 +40,9 @@ esphome:
       then:
         - lambda: id(pmu).disableWatchdog();
     # Battery: drop the CPU to 40 MHz whenever nothing holds a PM lock. Wi-Fi, SPI (display flushes) and I2C take
-    # locks while busy, so renders still run at 240. Light sleep stays off: it would cut USB serial and jitter touch.
+    # APB_MAX locks while busy, which on the S3 run the CPU at 80, not 240 (esp_pm pm_impl.c: min(max, APB 80)).
+    # Only a CPU_FREQ_MAX lock gives 240: the including config holds one when it wants speed (claude-buddy.yaml).
+    # Light sleep stays off: it would cut USB serial and jitter touch.
     - priority: 600
       then:
         - lambda: |-

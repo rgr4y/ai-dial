@@ -1,5 +1,6 @@
 # make sim     desktop simulator (ESPHome host build, SDL window); bridge talks to it on 127.0.0.1.
 #              Rebuilds and relaunches 2 s after the last change to the UI / component sources or configs.
+# make sim-panel  controls for the sim: pick a bot, pin it working or idle (build/sim-pin.jsonl)
 # make test    test:cpp, then test:node
 #   test:cpp   host C++ tests (tests/test_*.cpp)
 #   test:node  the bridge's npm test (node --test)
@@ -12,7 +13,7 @@ export DIAL_ASSETS
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c  # tee must not hide a failed build
 
-.PHONY: sim flash dialip test test\:cpp test\:node logs
+.PHONY: sim sim-panel flash dialip test test\:cpp test\:node logs
 # .env.dialip empty or missing: look the dial up on the network and record it. Otherwise nothing to do.
 dialip:
 	@[ -s .env.dialip ] || { ip=$$(scripts/find-dial.sh) && echo "$$ip" > .env.dialip && echo "dial at $$ip (.env.dialip)"; }
@@ -37,6 +38,10 @@ sim: dialip
 	watchexec --restart --debounce 2s --exts h,cpp,py,yaml,mjs \
 	  -w buddy -w components -w scripts -w buddy-ui.yaml -w claude-buddy-sim.yaml \
 	  -- esphome run claude-buddy-sim.yaml 2>&1 | tee build/sim.log
+
+sim-panel:  # controls for the sim (scripts/sim-panel.mjs): pick a bot, pin it working or idle
+	@(sleep 1; open http://localhost:19880) &
+	node scripts/sim-panel.mjs
 
 flash: dialip
 	@mkdir -p build

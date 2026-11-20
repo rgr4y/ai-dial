@@ -42,6 +42,9 @@ esphome:
               return std::isnan(id(bat_level).state) ? -1 : (int) id(bat_level).state;
             };
             buddyui::ui().on_usb = []() { return id(pmu).isVbusIn(); };
+            id(imu)->add_listener([](const motion::MotionData &d) {
+              gaze::update(d.acceleration[0], d.acceleration[1], d.acceleration[2], millis());
+            });
             ESP_LOGI("buddy", "Free internal heap %u, largest block %u", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
@@ -76,6 +79,43 @@ ota:
     on_abort:
       - lambda: buddyui::ota(3, 0, 0);
     encryption: 
+
+# ---- IMU: QMI8658 @0x6B (INT1 GPIO21, not wired in). Steers the pets' eyes while the dial moves (buddy/gaze.h). ----
+# axis_map puts +x at screen right and +y at screen down (unverified on the dial: tilt it and check the eyes follow).
+# Polled at the UI tick; stopped while the screen is dark so I2C doesn't hold the APB_MAX PM lock for nothing.
+motion:
+  - platform: qmi8658
+    id: imu
+    i2c_id: bus_a
+    accelerometer_odr: 125HZ
+    gyroscope_odr: 125HZ
+    update_interval: 50ms
+    axis_map: { x: x, y: y, z: z }
+
+lvgl:
+  on_pause:
+    - lambda: |-
+        id(imu)->stop_poller();
+        gaze::reset();
+  on_resume:
+    - lambda: id(imu)->start_poller();
+
+# ---- CPU speed. dial-hardware.yaml scales 240/80/40 MHz; on its own LVGL draws at 40 (it takes no PM lock). Hold a
+# CPU_FREQ_MAX lock (240) while the screen is on and either USB is in or the dial booted under 120 s ago. Dark, or on
+# battery after that: back to scaling.
+interval:
+  - interval: 1s
+    then:
+      - lambda: |-
+          static esp_pm_lock_handle_t lock = nullptr;
+          static bool held = false;
+          if (!lock && esp_pm_lock_create(ESP_PM_CPU_FREQ_MAX, 0, "awake", &lock) != ESP_OK) return;
+          bool usb = id(pmu).isVbusIn(), want = !buddyui::ui().asleep && (usb || millis() < 120000);
+          if (want == held) return;
+          (want ? esp_pm_lock_acquire : esp_pm_lock_release)(lock);
+          held = want;
+          ESP_LOGI("power", "CPU %s (screen %s, usb %d, up %us)", want ? "240 MHz" : "scaling",
+                   buddyui::ui().asleep ? "dark" : "on", usb, (unsigned) (millis() / 1000));
 
 # ---- Audio: ES8311 DAC -> NS4150B amp. Speaker, mixer, resamplers and media player from docs/esp32-dial.yaml ----
 # (no mic, no boot stream). Mixer and resampler layout from esphome-touchs3/esphome-touch-s3.yaml.

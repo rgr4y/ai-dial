@@ -10,7 +10,8 @@ prompts from it, over Wi-Fi. Protocol: [`../docs/DIAL-PROTOCOL.md`](../docs/DIAL
 - `board.mjs`: session state turned into a heartbeat. Pure; tested by `npm test`.
 - `hook.sh`: the hook command. It is fail-open: with no daemon or no dial, Claude Code behaves as if it weren't
   installed.
-- `install.mjs`: registers `hook.sh` in `~/.claude/settings.json` and backs the file up first. Remove it with
+- `install.mjs`: registers `hook.sh` in `~/.claude/settings.json`, `hook.sh codex` in `~/.codex/hooks.json` and
+  `hook.sh copilot` in `~/.copilot/settings.json` (busy-face events only), backing each file up first. Remove them with
   `node install.mjs --uninstall`.
 - `peon-shim/peon.sh`: feeds peon-ping adapters (Codex, Cursor, Gemini, …) to both peon-ping and the bridge.
 - `assets/`: character packs from `../scripts/gen_buddy_pets.mjs` (regenerated on every ESPHome compile).
@@ -20,7 +21,7 @@ prompts from it, over Wi-Fi. Protocol: [`../docs/DIAL-PROTOCOL.md`](../docs/DIAL
 
 ```bash
 npm install
-node install.mjs                                    # Claude Code hooks
+node install.mjs                                    # Claude Code, Codex and Copilot CLI hooks
 cp com.rob.dial-bridge.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rob.dial-bridge.plist
 npm run sim                                         # desktop simulator (SDL window), see below
 ```
@@ -36,6 +37,10 @@ component) for the Mac with ESPHome's `host` platform, drawing into an SDL windo
   `DIAL_HOST=10.0.0.11,127.0.0.1` makes the daemon drive it alongside the dial, so it shows the same live state.
 - **Input:** the mouse is touch. PWR and BOOT: click the keys on the case edge (placed as on the real dial), or press `p` / `b`. The window shows the 466 px glass inside the case at true scale.
 - **Pets:** read straight from `assets/` (no LittleFS, no sync); restart the sim after regenerating.
+- **Pin a scenario:** while `../build/sim-pin.jsonl` exists, the sim ignores the bridge and plays that file: one
+  `buddy_line` JSON per line (docs/DIAL-PROTOCOL.md), all lines when the file changes, heartbeats again every 5 s.
+  Delete it to hand back to the bridge. E.g. a busy Grok bot:
+  `{"total":1,"running":1,"waiting":0,"msg":"busy","entries":[],"avatar":"teardrop","avatar_color":16721468,"avatar_name":"3DBot","bots":[["teardrop",16721468,"3DBot"]]}`
 
 ## Grok Bot
 

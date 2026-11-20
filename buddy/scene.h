@@ -6,9 +6,15 @@
 // An "attached" scene (the alert bubble) has no body layer and borrows the origin of the scene it sits on (focus.c:961).
 // Pure maths is host-testable with -DSCENE_NO_LVGL (tests/test_buddy.cpp).
 #include <array>
+#include <cmath>
 #include <cstdint>
+#include <cstdlib>
+#include <memory>
 #include <string>
 #include <vector>
+#if __has_include(<esp_heap_caps.h>)
+#include <esp_heap_caps.h>
+#endif
 
 #ifdef SCENE_NO_LVGL
 struct lv_image_dsc_t { int w, h; };
@@ -21,27 +27,55 @@ namespace scene {
 
 static constexpr int W = 466, C = 233;
 
+// Pack data lives in PSRAM. The dial builds with CONFIG_SPIRAM_USE_CAPS_ALLOC, so plain new/malloc only ever take
+// internal RAM, and a full pack's scenes (hundreds of small vectors, map nodes, names) ran it out at boot. Host
+// builds (sim, tests) have no PSRAM: the std allocator.
+#if __has_include(<esp_heap_caps.h>)
+template<typename T> struct PsAlloc {
+  using value_type = T;
+  PsAlloc() = default;
+  template<typename U> PsAlloc(const PsAlloc<U> &) {}
+  T *allocate(size_t n) {
+    auto *p = (T *) heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM);
+    if (!p) abort();
+    return p;
+  }
+  void deallocate(T *p, size_t) { heap_caps_free(p); }
+  bool operator==(const PsAlloc &) const { return true; }
+  bool operator!=(const PsAlloc &) const { return false; }
+};
+#else
+template<typename T> using PsAlloc = std::allocator<T>;
+#endif
+template<typename T> using Vec = std::vector<T, PsAlloc<T>>;
+using Str = std::basic_string<char, std::char_traits<char>, PsAlloc<char>>;
+using Frames = Vec<const lv_image_dsc_t *>;
+
 // Loaded at boot from the character pack on LittleFS (buddy/character.h). Empty vectors mean "none".
 struct Disc { int16_t cx16, cy16, r16; uint32_t rgb; };  // juggling ball: filled disc, 1/16 px
 struct Layer {                               // translate-only: one frame set, per-step frame index and offset
-  std::vector<const lv_image_dsc_t *> frames;
-  std::vector<uint8_t> loop;
-  std::vector<std::array<int16_t, 2>> at;
+  Frames frames;
+  Vec<uint8_t> loop;
+  Vec<std::array<int16_t, 2>> at;
+  int32_t ink = -1;  // A8 frames: drawn in this 0xRRGGBB (the tint layer takes set_tint's instead); -1 none
 };
 struct Scene {
-  std::string name;
+  Str name;
   int16_t w = 0, h = 0, dx = 0, dy = 0;  // origin = ((466-w)/2+dx, 233-h/2+bias+dy)  (focus.c:374)
   uint8_t steps = 1; uint16_t step_ms = 100;
-  std::vector<Layer> layers;                 // back to front
+  Vec<Layer> layers;                         // back to front
   uint8_t discs = 0;
-  std::vector<Disc> disc;                    // per step: discs entries
-  std::vector<std::array<int16_t, 2>> count_at;  // alert: where the waiting count goes
+  Vec<Disc> disc;                            // per step: discs entries
+  Vec<std::array<int16_t, 2>> count_at;      // alert: where the waiting count goes
   int8_t tint = -1;                          // layer drawn in Player::set_tint's colour (Grok avatars); -1 none
+  // IMU gaze (buddy/gaze.h): the eyes layer moves up to rx, ry px. look[step] is the scripted glance baked into that
+  // layer's x, taken out while the IMU steers. layer -1: the scene has no separate eyes.
+  struct Gaze { int8_t layer = -1, rx = 0, ry = 0; Vec<int16_t> look; } gaze;
 };
 // Small pet above the recap card: zoom 6/8 and 4/8 frame sets, one (frame, dy) loop.
 struct Small {
-  std::vector<const lv_image_dsc_t *> z6, z4;
-  std::vector<std::array<int8_t, 2>> loop;
+  Frames z6, z4;
+  Vec<std::array<int8_t, 2>> loop;
   uint16_t step_ms = 100;
 };
 
@@ -53,6 +87,12 @@ inline Pt origin(const Scene &s, int bias) { return {((W - s.w) >> 1) + s.dx, C 
 inline Pt layer_pos(const Scene &s, const Scene &base, int bias, size_t i, uint8_t k) {
   Pt o = origin(base, bias);
   return {o.x + s.layers[i].at[k][0], o.y + s.layers[i].at[k][1]};
+}
+// Eyes layer position with the IMU steering: scripted glance out, offset (gx, gy px) in. Other layers unchanged.
+inline Pt gazed(const Scene &s, Pt p, size_t i, uint8_t k, int gx, int gy) {
+  if ((int) i != s.gaze.layer) return p;
+  int glance = k < s.gaze.look.size() ? s.gaze.look[k] : 0;
+  return {p.x - glance + gx, p.y + gy};
 }
 
 #ifndef SCENE_NO_LVGL
@@ -67,6 +107,8 @@ struct Player {
   int last = -1;
   bool once = false;
   uint32_t tinted = UINT32_MAX;  // set_tint's colour on this scene; UINT32_MAX none (styles cost a redraw, set once)
+  bool gaze_on = false;          // IMU steering the eyes layer (set_gaze); off: the scene's own glance
+  int gx = 0, gy = 0;            // eyes offset in px while gaze_on
 
   void create(lv_obj_t *parent, bool with_count = false) {
     for (auto &l : layer)
@@ -76,14 +118,14 @@ struct Player {
       lv_obj_remove_style_all(d);
       lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
       lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
-      lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(d, true);
     }
     for (auto *l : layer)
-      lv_obj_remove_flag(l, LV_OBJ_FLAG_CLICKABLE);
+      lv_obj_set_clickable(l, false);
     if (with_count) {
       count = lv_label_create(parent);
       lv_obj_set_style_text_color(count, lv_color_hex(0x006FFF), 0);  // focus.c: #006fff on the bubble
-      lv_obj_add_flag(count, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(count, true);
     }
     stop();
   }
@@ -113,14 +155,16 @@ struct Player {
     if (s->layers.size() > MAX_LAYERS)
       ESP_LOGE("buddyui", "scene %s has %u layers, drawing the first %d", s->name.c_str(), (unsigned) s->layers.size(), MAX_LAYERS);
     for (size_t i = 0; i < MAX_LAYERS; i++) {
-      (i < s->layers.size() ? lv_obj_remove_flag : lv_obj_add_flag)(layer[i], LV_OBJ_FLAG_HIDDEN);
-      lv_obj_set_style_image_recolor_opa(layer[i], LV_OPA_TRANSP, 0);
+      lv_obj_set_hidden(layer[i], i >= s->layers.size());
+      bool ink = i < s->layers.size() && s->layers[i].ink >= 0;
+      if (ink) lv_obj_set_style_image_recolor(layer[i], lv_color_hex(s->layers[i].ink), 0);
+      lv_obj_set_style_image_recolor_opa(layer[i], ink ? LV_OPA_COVER : LV_OPA_TRANSP, 0);
     }
     tinted = UINT32_MAX;
     for (int i = 0; i < 6; i++)
-      (i < s->discs ? lv_obj_remove_flag : lv_obj_add_flag)(disc[i], LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(disc[i], i >= s->discs);
     if (count)
-      (!s->count_at.empty() ? lv_obj_remove_flag : lv_obj_add_flag)(count, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(count, s->count_at.empty());
     tick(now);
   }
   // Paint the scene's tint layer (white art) in rgb. After play(); a new scene clears it.
@@ -131,14 +175,28 @@ struct Player {
     lv_obj_set_style_image_recolor(layer[sc->tint], lv_color_hex(rgb), 0);
     lv_obj_set_style_image_recolor_opa(layer[sc->tint], LV_OPA_COVER, 0);
   }
+  // IMU gaze (buddy/gaze.h look(), -1..1). Call every tick: moves the eyes layer between steps too, as the
+  // dial tilts, without touching the other layers.
+  void set_gaze(bool on, float x, float y) {
+    int nx = 0, ny = 0;
+    if (on && sc) nx = (int) lroundf(x * sc->gaze.rx), ny = (int) lroundf(y * sc->gaze.ry);
+    if (on == gaze_on && nx == gx && ny == gy) return;
+    gaze_on = on, gx = nx, gy = ny;
+    if (!sc || last < 0 || sc->gaze.layer < 0 || sc->gaze.layer >= (int) sc->layers.size() || sc->gaze.layer >= MAX_LAYERS)
+      return;
+    size_t i = sc->gaze.layer;
+    Pt p = layer_pos(*sc, *base, bias, i, last);
+    if (gaze_on) p = gazed(*sc, p, i, last, gx, gy);
+    lv_obj_set_pos(layer[i], p.x, p.y);
+  }
   void stop() {
     sc = nullptr;
     for (auto *l : layer)
-      lv_obj_add_flag(l, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(l, true);
     for (auto *d : disc)
-      lv_obj_add_flag(d, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(d, true);
     if (count)
-      lv_obj_add_flag(count, LV_OBJ_FLAG_HIDDEN);
+      lv_obj_set_hidden(count, true);
   }
   void tick(uint32_t now) {
     if (!sc)
@@ -153,6 +211,7 @@ struct Player {
       const Layer &l = sc->layers[i];
       lv_image_set_src(layer[i], l.frames[l.loop[k]]);
       Pt p = layer_pos(*sc, *base, bias, i, k);
+      if (gaze_on) p = gazed(*sc, p, i, k, gx, gy);
       lv_obj_set_pos(layer[i], p.x, p.y);
     }
     Pt o = origin(*base, bias);
@@ -167,11 +226,11 @@ struct Player {
     if (count && !sc->count_at.empty()) {
       const auto &ca = sc->count_at[k];
       if (ca[0] || ca[1]) {
-        lv_obj_remove_flag(count, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(count, false);
         lv_obj_update_layout(count);
         lv_obj_set_pos(count, o.x + ca[0] - lv_obj_get_width(count) / 2, o.y + ca[1] - lv_obj_get_height(count) / 2);
       } else {
-        lv_obj_add_flag(count, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_set_hidden(count, true);
       }
     }
   }

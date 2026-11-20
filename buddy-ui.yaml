@@ -49,7 +49,7 @@ api:
       variables:
         line: string
       then:
-        - lambda: id(buddy).feed_line(line);
+        - lambda: if (!id(buddy).mute_api) id(buddy).feed_line(line);
     # Remote touch: allow, deny, later, card, bell, hold, back, wake, screen, boot (buddy/ui.h tap()).
     - action: buddy_tap
       variables:
@@ -98,6 +98,9 @@ interval:
   - interval: 50ms
     then:
       - lambda: |-
+          // IMU gaze (buddy/gaze.h; fed by the dial's IMU, or the sim's arrow keys): eyes layer only.
+          gaze::Look look = gaze::look();
+          buddyui::ui().scene.set_gaze(look.on, look.x, look.y);
           buddyui::tick(millis());
           if (buddyui::take_wake()) {
             id(lvgl_comp).set_paused(false, false);

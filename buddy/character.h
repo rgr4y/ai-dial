@@ -62,7 +62,7 @@ static constexpr const char *ROOT = "/littlefs";
 
 struct Pack {
   std::string rev;
-  std::map<std::string, scene::Scene> scenes;
+  std::map<scene::Str, scene::Scene, std::less<>, scene::PsAlloc<std::pair<const scene::Str, scene::Scene>>> scenes;
   scene::Small small;
 };
 inline Pack &pack() {
@@ -74,21 +74,9 @@ inline const scene::Scene *find(const char *role) {
   return it == pack().scenes.end() ? nullptr : &it->second;
 }
 
-// Manifests are ~20 KB: keep them in PSRAM, internal heap can't spare a block that size.
-template<typename T> struct PsAlloc {
-  using value_type = T;
-  PsAlloc() = default;
-  template<typename U> PsAlloc(const PsAlloc<U> &) {}
-  T *allocate(size_t n) {
-    auto *p = (T *) heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM);
-    if (!p) abort();
-    return p;
-  }
-  void deallocate(T *p, size_t) { heap_caps_free(p); }
-  bool operator==(const PsAlloc &) const { return true; }
-  bool operator!=(const PsAlloc &) const { return false; }
-};
-using PString = std::basic_string<char, std::char_traits<char>, PsAlloc<char>>;
+// Manifests are ~20 KB: keep them in PSRAM, internal heap can't spare a block that size (allocator: scene.h).
+using scene::PsAlloc;
+using PString = scene::Str;
 inline JsonDocument parse(const PString &s) { return esphome::json::parse_json((const uint8_t *) s.data(), s.size()); }
 
 inline bool read_file(const std::string &path, PString &out) {
@@ -129,6 +117,11 @@ inline bool mount() {
 #endif
 
 // One frame file (lv_image_header_t + lv_image_compressed_t header + RLE body) -> an uncompressed RGB565A8
+// LVGL 9.6 (ESPHome 2026.11) moved this to src/libs/rle/lv_rle_private.h, off the include path. Still built
+// (LV_USE_RLE; the bin decoder uses it), same signature since 9.2: declare it here.
+extern "C" uint32_t lv_rle_decompress(const uint8_t *input, uint32_t input_buff_len, uint8_t *output,
+                                      uint32_t output_buff_len, uint8_t blk_size);
+
 // lv_image_dsc_t in PSRAM. Never freed: packs only change across a reboot.
 inline const lv_image_dsc_t *load_frame(const std::string &path) {
   PString f;
@@ -137,8 +130,11 @@ inline const lv_image_dsc_t *load_frame(const std::string &path) {
   auto u32 = [&](size_t o) { return (uint32_t) u16(o) | (uint32_t) u16(o + 2) << 16; };
   uint16_t w = u16(4), h = u16(6);
   uint32_t clen = u32(16), dlen = u32(20);
-  if ((uint8_t) f[0] != LV_IMAGE_HEADER_MAGIC || (uint8_t) f[1] != LV_COLOR_FORMAT_RGB565A8 || u32(12) != 1 ||
-      24 + clen != f.size() || dlen != (uint32_t) w * h * 3)
+  // RGB565A8 (3 bytes a pixel), or A8 (alpha only; drawn in the layer's recolor, i.e. Player::set_tint).
+  uint8_t cf = (uint8_t) f[1];
+  bool a8 = cf == LV_COLOR_FORMAT_A8;
+  if ((uint8_t) f[0] != LV_IMAGE_HEADER_MAGIC || (cf != LV_COLOR_FORMAT_RGB565A8 && !a8) || u32(12) != 1 ||
+      24 + clen != f.size() || dlen != (uint32_t) w * h * (a8 ? 1 : 3))
     return nullptr;
   auto *d = (lv_image_dsc_t *) heap_caps_malloc(sizeof(lv_image_dsc_t) + dlen, MALLOC_CAP_SPIRAM);
   if (!d) return nullptr;
@@ -149,22 +145,22 @@ inline const lv_image_dsc_t *load_frame(const std::string &path) {
   }
   memset(d, 0, sizeof(*d));
   d->header.magic = LV_IMAGE_HEADER_MAGIC;
-  d->header.cf = LV_COLOR_FORMAT_RGB565A8;
+  d->header.cf = cf;
   d->header.w = w;
   d->header.h = h;
-  d->header.stride = w * 2;
+  d->header.stride = a8 ? w : w * 2;
   d->data_size = dlen;
   d->data = px;
   return d;
 }
 
-template<typename T> std::vector<T> ints(JsonVariantConst a) {
-  std::vector<T> v;
+template<typename T> scene::Vec<T> ints(JsonVariantConst a) {
+  scene::Vec<T> v;
   for (JsonVariantConst x : a.as<JsonArrayConst>()) v.push_back((T) (x | 0));
   return v;
 }
-template<typename T> std::vector<std::array<T, 2>> pairs(JsonVariantConst a) {
-  std::vector<std::array<T, 2>> v;
+template<typename T> scene::Vec<std::array<T, 2>> pairs(JsonVariantConst a) {
+  scene::Vec<std::array<T, 2>> v;
   for (JsonVariantConst x : a.as<JsonArrayConst>()) v.push_back({(T) (x[0] | 0), (T) (x[1] | 0)});
   return v;
 }
@@ -185,7 +181,7 @@ inline bool load(const char *name, void (*first)() = nullptr) {
   }
   uint32_t t0 = esphome::millis();
   size_t before = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
-  std::map<std::string, std::vector<const lv_image_dsc_t *>> sets;
+  std::map<scene::Str, scene::Frames, std::less<>, PsAlloc<std::pair<const scene::Str, scene::Frames>>> sets;
   // Decode one frame set unless already done. False on a bad frame.
   auto need = [&](const char *key) {
     if (sets.count(key)) return true;
@@ -201,7 +197,7 @@ inline bool load(const char *name, void (*first)() = nullptr) {
     }
     return true;
   };
-  auto set = [&](JsonVariantConst n) { return n.isNull() ? std::vector<const lv_image_dsc_t *>{} : sets[n | ""]; };
+  auto set = [&](JsonVariantConst n) { return n.isNull() ? scene::Frames{} : sets[n | ""]; };
   Pack &pk = pack();
   auto build = [&](const char *key, JsonObjectConst o) {
     scene::Scene &s = pk.scenes[key];
@@ -210,9 +206,12 @@ inline bool load(const char *name, void (*first)() = nullptr) {
     s.steps = o["steps"] | 1, s.step_ms = o["step_ms"] | 100;
     s.layers.clear();
     for (JsonVariantConst l : o["layers"].as<JsonArrayConst>())
-      s.layers.push_back({set(l["set"]), ints<uint8_t>(l["loop"]), pairs<int16_t>(l["at"])});
+      s.layers.push_back({set(l["set"]), ints<uint8_t>(l["loop"]), pairs<int16_t>(l["at"]), l["ink"] | -1});
     s.count_at = pairs<int16_t>(o["count_at"]);
     s.tint = o["tint"] | -1;
+    JsonObjectConst g = o["gaze"];  // absent (older packs, scenes without separate eyes): no IMU gaze
+    s.gaze = {};
+    if (!g.isNull()) s.gaze = {(int8_t) (g["layer"] | -1), (int8_t) (g["x"] | 0), (int8_t) (g["y"] | 0), ints<int16_t>(g["look"])};
     s.discs = o["discs"] | 0;
     s.disc.clear();
     for (JsonVariantConst d : o["disc"].as<JsonArrayConst>())

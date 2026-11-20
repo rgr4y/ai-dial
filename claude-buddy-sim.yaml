@@ -87,7 +87,7 @@ esphome:
               lv_obj_set_style_border_width(o, width, 0);
               lv_obj_set_style_border_color(o, lv_color_hex(color), 0);
               lv_obj_set_style_border_opa(o, LV_OPA_COVER, 0);
-              lv_obj_remove_flag(o, LV_OBJ_FLAG_CLICKABLE);
+              lv_obj_set_clickable(o, false);
             };
             lv_obj_set_style_bg_color(lv_scr_act(), lv_color_hex(0x101014), 0);
             ring(CASE + 2 * 60, 60, 0x101014);         // window outside the case (covers the UI square's corners)
@@ -107,7 +107,7 @@ esphome:
               lv_obj_set_style_transform_pivot_x(k, KW / 2, 0);
               lv_obj_set_style_transform_pivot_y(k, KH / 2, 0);
               lv_obj_set_style_transform_rotation(k, (int) (DEG[key] * 10), 0);
-              lv_obj_add_flag(k, LV_OBJ_FLAG_CLICKABLE);  // no handlers (touchscreen: hit-tests the keys), but eats the press so it can't reach the UI root
+              lv_obj_set_clickable(k, true);  // no handlers (touchscreen: hit-tests the keys), but eats the press so it can't reach the UI root
               lv_obj_set_ext_click_area(k, REACH);
               bs->add_on_state_callback([k](bool on) { (on ? lv_obj_add_state : lv_obj_remove_state)(k, LV_STATE_PRESSED); });
               lv_obj_t *l = lv_label_create(lv_layer_top());
@@ -210,3 +210,51 @@ binary_sensor:
           id(sim_usb) = !id(sim_usb);
           ESP_LOGI("sim", "battery %d%% usb %d", id(sim_bat), id(sim_usb));
 
+  # Fake IMU: arrow keys tip the dial 25 deg that way while held, or drag with the right mouse button: the dial tips
+  # toward the pointer, up to 40 deg at the glass edge (the left button stays the touchscreen). The dial's qmi8658:
+  # claude-buddy.yaml.
+  - { platform: sdl, id: tilt_l, key: SDLK_LEFT }
+  - { platform: sdl, id: tilt_r, key: SDLK_RIGHT }
+  - { platform: sdl, id: tilt_u, key: SDLK_UP }
+  - { platform: sdl, id: tilt_d, key: SDLK_DOWN }
+
+interval:
+  # Pin: while build/sim-pin.jsonl exists the sim ignores the bridge and plays that file instead (one buddy_line per
+  # line, docs/DIAL-PROTOCOL.md): every line when the file changes, its heartbeats again every 5 s to stay live.
+  # Delete the file to hand the face back to the bridge (its next heartbeat, 10 s at most).
+  - interval: 500ms
+    then:
+      - lambda: |-
+          static std::string seen;
+          static uint32_t fed = 0;
+          FILE *f = fopen("build/sim-pin.jsonl", "r");
+          bool on = f != nullptr;
+          if (on != id(buddy).mute_api) ESP_LOGI("sim", "pin %s", on ? "on: bridge ignored" : "off: bridge back");
+          id(buddy).mute_api = on;
+          if (!on) { seen.clear(); return; }
+          std::string all;
+          static char buf[8192];
+          while (size_t n = fread(buf, 1, sizeof(buf), f)) all.append(buf, n);
+          fclose(f);
+          bool changed = all != seen;  // content, not mtime: two clicks in one second share an mtime
+          if (!changed && millis() - fed < 5000) return;
+          seen = all, fed = millis();
+          for (size_t i = 0, j; i < all.size(); i = j + 1) {
+            j = all.find('\n', i);
+            if (j == std::string::npos) j = all.size();
+            std::string l = all.substr(i, j - i);
+            if (!l.empty() && l.back() == '\r') l.pop_back();
+            if (!l.empty() && l[0] == '{' && (changed || l.find("\"total\"") != std::string::npos)) id(buddy).feed_line(l);
+          }
+  - interval: 50ms  # the dial's IMU poll rate
+    then:
+      - lambda: |-
+          float s = sinf(25 * 3.14159265f / 180);
+          float ax = s * (id(tilt_r).state - id(tilt_l).state), ay = s * (id(tilt_d).state - id(tilt_u).state);
+          int mx, my;
+          if (SDL_GetMouseState(&mx, &my) & SDL_BUTTON_RMASK) {
+            float k = sinf(40 * 3.14159265f / 180) / 233;  // window px from the glass centre -> sin(tilt)
+            ax = fmaxf(-0.9f, fminf(0.9f, (mx - sim_keys::C) * k));
+            ay = fmaxf(-0.9f, fminf(0.9f, (my - sim_keys::C) * k));
+          }
+          gaze::update(ax, ay, sqrtf(fmaxf(0, 1 - ax * ax - ay * ay)), millis());
