@@ -7,10 +7,11 @@
 substitutions:
   name: claude-buddy
   friendly_name: Claude Buddy
-  # Audio (from docs/esp32-dial.yaml). The slider (1-100) maps linearly onto the usable range: below volume_min it's
+  # Audio (from docs/esp32-dial.yaml). 16 kHz: voice_assistant needs a 16 kHz mic, and the mic and speaker share one
+  # full-duplex I2S bus (one rate for both), so sounds play at 16 kHz. The slider (1-100) maps linearly onto the usable range: below volume_min it's
   # inaudible, above volume_max it distorts. ES8311 reg 0x32: 0.75 = 0dB (0xBF), each 0.01 is about 1dB. 0 = mute.
   i2s_bps: 16bit
-  i2s_sample_rate: "44100"
+  i2s_sample_rate: "16000"
   volume_min: "0.60"
   volume_max: "0.72"
 
@@ -45,6 +46,17 @@ esphome:
             id(imu)->add_listener([](const motion::MotionData &d) {
               gaze::update(d.acceleration[0], d.acceleration[1], d.acceleration[2], millis());
             });
+            // Hold the face (buddy/ui.h on_hold): the dial streams mic audio to the bridge, which is the voice_assistant's
+            // API client. No subscriber (bridge down, or Home Assistant got there first) = no start.
+            buddyui::ui().on_voice = [](bool on) -> bool {
+              if (!on) {
+                id(va)->request_stop();
+                return true;
+              }
+              if (id(va)->get_api_connection() == nullptr || id(va)->is_running()) return false;
+              id(va)->request_start(false, false);  // not continuous, no silence detection: the release ends it
+              return true;
+            };
             ESP_LOGI("buddy", "Free internal heap %u, largest block %u", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
@@ -117,10 +129,13 @@ interval:
           ESP_LOGI("power", "CPU %s (screen %s, usb %d, up %us)", want ? "240 MHz" : "scaling",
                    buddyui::ui().asleep ? "dark" : "on", usb, (unsigned) (millis() / 1000));
 
-# ---- Audio: ES8311 DAC -> NS4150B amp. Speaker, mixer, resamplers and media player from docs/esp32-dial.yaml ----
-# (no mic, no boot stream). Mixer and resampler layout from esphome-touchs3/esphome-touch-s3.yaml.
+# ---- Audio: ES8311 DAC -> NS4150B amp, ES7210 ADC (mic data GPIO10) on the same I2S bus ----
+# Speaker, mixer, resamplers and media player from docs/esp32-dial.yaml (no boot stream). Mixer and resampler layout
+# from esphome-touchs3/esphome-touch-s3.yaml. One bus, full duplex (ESPHome 2026.11, #19959): mic and speaker must
+# agree on rate, bits, mclk multiple.
 i2s_audio:
   - id: i2s_out
+    full_duplex: true
     i2s_lrclk_pin:
       number: GPIO45
       ignore_strapping_warning: true  # board wiring: I2S WS
@@ -133,6 +148,32 @@ audio_dac:
     i2c_id: bus_a
     bits_per_sample: ${i2s_bps}
     sample_rate: ${i2s_sample_rate}
+
+# ES7210: I2C 0x40, clocked from the ESP's MCLK (256 x rate, which its driver hard-codes). 37.5 dB is the vendor firmware's
+# mic gain (docs/FIRMWARE-OPTIONS.md); lower it if the transcript clips.
+audio_adc:
+  - platform: es7210
+    id: adc
+    i2c_id: bus_a
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+    mic_gain: 37.5dB
+
+microphone:
+  - platform: i2s_audio
+    id: mic
+    i2s_audio_id: i2s_out
+    i2s_din_pin: GPIO10
+    adc_type: external
+    pdm: false
+    bits_per_sample: ${i2s_bps}
+    sample_rate: ${i2s_sample_rate}
+
+# Audio goes out to the bridge (dial-bridge.mjs), not Home Assistant. Only one API client can subscribe; if HA adds the
+# dial and subscribes first, the bridge is refused (ESPHome logs "Multiple API Clients attempting to connect").
+voice_assistant:
+  id: va
+  microphone: mic
 
 speaker:
   - platform: i2s_audio

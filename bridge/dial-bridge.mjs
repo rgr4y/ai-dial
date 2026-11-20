@@ -18,7 +18,12 @@
 // all get the same heartbeats, the first to answer a prompt wins.
 // Config (env): DIAL_HOST (10.0.0.11, reserved on the router; e.g. "10.0.0.11,127.0.0.1"), DIAL_KEY (API encryption key; default: api_key from
 // DIAL_SECRETS, ~/workspace/esphome/secrets.yaml), DIAL_BRIDGE_PORT (19876), DIAL_PROMPT_TIMEOUT_S (280),
-// GROK_BOT_STORE (Grok Bot's store dir, watched read-only; skipped if absent).
+// GROK_BOT_STORE (Grok Bot's store dir, watched read-only; skipped if absent), VOICE_STT_HOST / VOICE_STT_PORT
+// (Wyoming STT, 127.0.0.1:10300).
+//
+// Voice: the dial's voice_assistant streams mic audio to this daemon (the API client that subscribed), which relays it
+// to a Wyoming STT server, sends the words back as {"evt":"voice"} lines and, when the dial says "send"
+// (buddy_ui voice), types the text into the iTerm session of the dial's sid. See docs/DIAL-PROTOCOL.md "Voice".
 
 import { execFile } from 'node:child_process';
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, watch } from 'node:fs';
@@ -28,12 +33,16 @@ import { join, normalize, sep } from 'node:path';
 import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
 import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
+import { cleanText, openStt, registerVoiceMessages, typeIntoTty } from './voice.mjs';
 
 const { Client, ServiceArgType } = esphome;
 const HOSTS = (process.env.DIAL_HOST || '10.0.0.11').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
 const PORT = Number(process.env.DIAL_BRIDGE_PORT || 19876);
 const PROMPT_TIMEOUT_MS = Number(process.env.DIAL_PROMPT_TIMEOUT_S || 280) * 1000;
 const GROK_STORE = process.env.GROK_BOT_STORE || `${homedir()}/Library/Application Support/Grok Bot/sand-client-persistence`;
+const STT_HOST = process.env.VOICE_STT_HOST || '127.0.0.1';
+const STT_PORT = Number(process.env.VOICE_STT_PORT || 10300);
+const pb = registerVoiceMessages();  // before any connection: the API library lacks the voice message ids
 const KEEPALIVE_MS = 10000; // the dial treats 30 s of silence as gone
 
 function apiKey() {
@@ -51,7 +60,7 @@ const waiters = new Map(); // prompt id -> resolve(decision | null)
 // ---- dial links ----
 // One per host: { host, client, keys, ready, ui }.
 const dials = HOSTS.map((host) => ({ host, client: null, lineKey: null, tapKey: null, decisionKey: null, uiKey: null,
-                                     ready: false, ui: null, lastErr: null }));
+                                     ready: false, ui: null, lastErr: null, stt: null, pending: null }));
 const anyReady = () => dials.some((d) => d.ready);
 
 function connectDial(dial) {
@@ -81,6 +90,7 @@ function connectDial(dial) {
       try {
         dial.ui = JSON.parse(m.state);
         onUiForUsage();
+        onUiForVoice(dial);
       } catch {}
       return;
     }
@@ -91,7 +101,17 @@ function connectDial(dial) {
     log(`dial ${dial.host} answered`, id, decision);
     resolve(decision === 'once' ? 'allow' : 'deny');
   });
+  client.connection.on('message.VoiceAssistantRequest', (m) => (m.start ? voiceStart(dial) : voiceStop(dial)));
+  client.connection.on('message.VoiceAssistantAudio', (m) => { if (m.data) dial.stt?.audio(Buffer.from(m.data, 'base64')); });
   client.on('initialized', () => {
+    try {
+      const sub = new pb.SubscribeVoiceAssistantRequest();  // one subscriber only: HA doing the same would lock us out
+      sub.setSubscribe(true);
+      sub.setFlags(0);
+      client.connection.sendMessage(sub);
+    } catch (e) {
+      log(`voice subscribe on ${dial.host} failed:`, e.message);
+    }
     dial.ready = !!dial.lineKey;
     dial.lastErr = null;
     log(dial.ready ? `dial connected (${dial.host})` : `dial ${dial.host} has no buddy_line action: old firmware?`);
@@ -101,6 +121,8 @@ function connectDial(dial) {
     if (dial.ready) log(`dial disconnected (${dial.host})`);
     dial.ready = false;
     dial.ui = null;
+    dial.stt?.abort();
+    dial.stt = dial.pending = null;
     onUiForUsage();
   });
   client.on('error', (e) => {
@@ -111,9 +133,10 @@ function connectDial(dial) {
 }
 
 // obj: a line, or (dial) => line when it differs per dial (heartbeats carry the asset URL each dial reaches us at).
-function sendLine(obj) {
+// only: one dial (voice lines go back to the dial that spoke).
+function sendLine(obj, only) {
   let sent = false;
-  for (const dial of dials) {
+  for (const dial of only ? [only] : dials) {
     if (!dial.ready) continue;
     try {
       dial.client.connection.executeServiceService({
@@ -126,6 +149,59 @@ function sendLine(obj) {
     }
   }
   return sent;
+}
+
+// ---- voice ----
+// The dial holds its face -> voice_assistant.start -> VoiceAssistantRequest(start) here; audio chunks follow as
+// VoiceAssistantAudio; release -> VoiceAssistantRequest(stop). The dial's buddy_ui carries voice (listening, wait,
+// confirm, send, note) and sid (the session it talks to, fixed when the hold began). Text only goes out on "send", and
+// only to a session whose terminal we know: no tty, no typing.
+const say = (dial, o) => sendLine({ evt: 'voice', ...o }, dial);
+function voiceStart(dial) {
+  dial.stt?.abort();
+  dial.pending = null;
+  const res = new pb.VoiceAssistantResponse();  // port 0: audio comes over the API connection
+  res.setPort(0);
+  res.setError(false);
+  try {
+    dial.client.connection.sendMessage(res);
+  } catch (e) {
+    return log(`voice start on ${dial.host} failed:`, e.message);
+  }
+  log(`voice: listening (${dial.host})`);
+  dial.stt = openStt({ host: STT_HOST, port: STT_PORT, onPartial: (text) => say(dial, { text }) });
+}
+function voiceStop(dial) {
+  const stt = dial.stt;
+  dial.stt = null;
+  if (!stt) return;
+  stt.finish().then((raw) => {
+    const text = cleanText(raw), sid = dial.ui?.sid;
+    if (!text) return say(dial, { error: "Didn't catch that" });
+    if (!sid || !board.tty(sid)) {
+      log(`voice: no terminal known for session ${sid || '(none)'}, dropped`);
+      return say(dial, { error: 'No terminal for that session' });
+    }
+    dial.pending = { text, sid };
+    say(dial, { final: text });
+  }, (e) => {
+    log('voice: stt failed:', e.message);
+    say(dial, { error: 'Speech service offline' });
+  });
+}
+// Dial state: "send" releases the text; leaving wait / confirm any other way (tap to cancel, timeout) drops it.
+// A "send" with nothing pending (the simulator's fake words) is ignored.
+function onUiForVoice(dial) {
+  const v = dial.ui?.voice;
+  if (v === 'wait' || v === 'confirm') return;
+  const p = dial.pending;
+  dial.pending = null;
+  if (v !== 'send' || !p) return;
+  const tty = board.tty(p.sid);
+  if (!tty) return log(`voice: no terminal known for session ${p.sid}, dropped`);
+  typeIntoTty(tty, p.text).then(
+    (ok) => log(ok ? `voice: typed ${p.text.length} chars into ${tty}` : `voice: no iTerm session on ${tty}, dropped`),
+    (e) => log('voice: osascript failed:', e.message));
 }
 
 // ---- plan usage ----

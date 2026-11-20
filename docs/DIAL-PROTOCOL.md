@@ -97,6 +97,7 @@ Each line is one Claude desktop Hardware Buddy JSON object
  "dots":"2/3",                                      // page dots (more than one session working): focused / working
  "word":"Claude", "sub":"Waiting for the bridge",   // brand view
  "perm":{"title":"Allow Bash?","hint":"api: rm -rf /tmp/x","count":"1 of 2 waiting"},
+ "voice":"listening|wait|confirm|send|note","sid":"s1",   // hold-to-talk (section 5): state, and the session it types into
  "alarm":"87%"}                                     // usage_pct >= 80 during the usage flash: red, pulsing, pet hidden
 ```
 Scenes and shimmer animate on the receiver's clock: the timing is fixed, so a mirror only needs the names.
@@ -116,7 +117,38 @@ Each target does exactly what the matching touch on the glass does (`buddy/ui.h`
 | `wake` | Wake the screen only. |
 | `screen` | PWR: screen on/off. |
 
-## 5. Simulator
+## 5. Voice (hold the face, speak, release)
+
+Hold the face 650 ms (LVGL `LONG_PRESSED` on the face or the reply card). The dial picks the **target session** then and
+keeps it in `sid`: the focused working session, an opened notice's session, or the session whose reply is on the card.
+With none (idle, nothing on the card) it shows "No session to talk to" and does not listen.
+
+```
+dial   hold            ui {voice:"listening", sid}      voice_assistant starts (no VAD)
+dial   ──VoiceAssistantRequest(start)──▶ bridge          bridge answers VoiceAssistantResponse(port 0): audio over the API
+dial   ──VoiceAssistantAudio*──────────▶ bridge ──audio-chunk*──▶ Wyoming STT (127.0.0.1:10300)
+bridge ──{"evt":"voice","text":"…"}────▶ dial            partials (STT servers that stream them), shown live on the reply card
+dial   release          ui {voice:"wait"}                mic runs 300 ms more, then VoiceAssistantRequest(stop)
+bridge ──{"evt":"voice","final":"…"}───▶ dial            sent only after audio-stop; or {"evt":"voice","error":"…"}
+dial   ui {voice:"confirm"}                              final text on the card 2 s, "Tap to cancel"
+dial   ui {voice:"send"} (or voice gone = cancelled)     bridge types text + Return into the session's iTerm tab
+```
+
+- Lines carry one of `text` (partial), `final` (the transcript; empty = nothing heard) or `error` (shown for 2 s).
+- The bridge only types text it produced itself for that dial (`final`), into the terminal of `sid`
+  (`Board.tty(sid)`, from `hook.sh`'s `tty`, matched to an iTerm session's `tty` by AppleScript). No tty for the session:
+  the bridge answers with an `error` instead of a `final`; nothing is typed. A `send` with no pending text is ignored.
+- Text goes in with `write text … newline NO`, then a separate bare newline (Claude Code reads text + Return in one
+  burst as a paste). It travels as an `osascript` argument, never inside the script.
+- ESPHome's voice assistant takes **one** API client. The bridge subscribes (`SubscribeVoiceAssistantRequest`); if Home
+  Assistant has the dial and subscribed first, the bridge is refused. `@2colors/esphome-native-api` has the protobuf
+  classes but not the voice message ids: `bridge/voice.mjs` registers 89, 90, 91, 92 and 106 in its id table at runtime.
+- Audio is 16 kHz, 16-bit, mono (ES7210 → I2S, full duplex with the speaker, so sounds play at 16 kHz too).
+- STT: `VOICE_STT_HOST` / `VOICE_STT_PORT` (127.0.0.1:10300). The Swift `AppleSTT` server streams `transcript-chunk`
+  partials. `wyoming-macos-stt` (the Python one under launchd now) sends only the final `transcript`: the card shows
+  "…" while you speak.
+
+## 6. Simulator
 
 There is no separate protocol: `claude-buddy-sim.yaml` runs the dial's own firmware UI on the Mac (ESPHome `host`,
 SDL window) and the bridge talks to it exactly as to the dial, as one more `DIAL_HOST`.

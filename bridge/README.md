@@ -42,6 +42,19 @@ component) for the Mac with ESPHome's `host` platform, drawing into an SDL windo
   Delete it to hand back to the bridge. E.g. a busy Grok bot:
   `{"total":1,"running":1,"waiting":0,"msg":"busy","entries":[],"avatar":"teardrop","avatar_color":16721468,"avatar_name":"3DBot","bots":[["teardrop",16721468,"3DBot"]]}`
 
+## Voice
+
+Hold the dial's face, speak, release. The dial streams the mic to the bridge (ESPHome `voice_assistant`, the bridge is
+its API client), the bridge relays it to a Wyoming STT server (`VOICE_STT_HOST`, `VOICE_STT_PORT`; default
+127.0.0.1:10300), the words show on the dial's reply card, and 2 s after the final text appears (tap the card to
+cancel) the bridge types it plus Return into the iTerm tab of the session the dial was showing (matched by the tty
+`hook.sh` records). Details and limits: docs/DIAL-PROTOCOL.md section 5. First run: macOS asks to let the bridge
+control iTerm (Automation); the bridge runs under launchd, so approve it for that process. Only `voice.mjs` touches iTerm.
+
+In the sim there is no mic: holding the face fakes the words ("fix the failing test in auth module", one word per
+400 ms), and the final 0.7 s after release. Pin a session first (`make sim-panel`: "3 sessions" or "Reply card"), or
+the hold says "No session to talk to". The fake final never reaches iTerm: the bridge ignores a `send` it has no text for.
+
 ## Grok Bot
 
 The bridge also watches Grok Bot's local store (`~/Library/Application Support/Grok Bot/sand-client-persistence/`,

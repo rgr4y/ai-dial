@@ -30,6 +30,14 @@ struct Notice {
   Bot bot;
 };
 
+// The last {"evt":"voice"} line from the bridge: partial words (text), the final (final = true), or an error to show.
+// seq counts lines, so the UI can tell a new one from the same text twice.
+struct VoiceLine {
+  std::string text, error;
+  bool final = false;
+  uint32_t seq = 0;
+};
+
 // One provider on the usage screen: rate windows of (label, percent used, time to reset).
 struct UsageCard {
   struct Win {
@@ -79,6 +87,8 @@ class ClaudeBuddy : public Component {
   // Who wrote last_text: a Grok bot (shape set), another agent ("codex", "copilot"), or Claude Code (both empty).
   const Bot &last_bot() const { return this->last_bot_; }
   const std::string &last_agent() const { return this->last_agent_; }
+  const std::string &last_sid() const { return this->last_sid_; }  // session that wrote last_text
+  const VoiceLine &voice() const { return this->voice_; }
   std::vector<Notice> &notices() { return this->notices_; }  // oldest first; the UI pops them when read
   void approve() { this->decide_("once"); }
   void deny() { this->decide_("deny"); }
@@ -94,7 +104,8 @@ class ClaudeBuddy : public Component {
   std::string last_text_;
   uint32_t last_text_ms_{0};
   Bot last_bot_;
-  std::string last_agent_;
+  std::string last_agent_, last_sid_;
+  VoiceLine voice_;
   std::vector<Notice> notices_;
   bool was_live_{false};
 };

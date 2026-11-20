@@ -67,6 +67,14 @@ esphome:
         - lambda: |-
             buddyui::ui().battery = []() { return id(sim_bat); };
             buddyui::ui().on_usb = []() { return id(sim_usb); };
+            // No mic here: holding the face fakes the bridge. Words arrive every 400 ms while held; 700 ms after the
+            // release comes the final (empty if released at once = "Didn't catch that"). The interval below feeds them.
+            buddyui::ui().on_voice = [](bool on) -> bool {
+              id(sim_voice_on) = on;
+              if (on) id(sim_voice_n) = -1, id(sim_voice_at) = millis(), id(sim_voice_final_at) = 0;
+              else id(sim_voice_final_at) = millis() + 700;
+              return true;
+            };
     - priority: -200
       then:
         - lambda: |-
@@ -182,6 +190,10 @@ light:
     restore_mode: ALWAYS_ON
 
 globals:
+  - { id: sim_voice_on, type: bool, initial_value: "false" }
+  - { id: sim_voice_n, type: int, initial_value: "0" }
+  - { id: sim_voice_at, type: uint32_t, initial_value: "0" }
+  - { id: sim_voice_final_at, type: uint32_t, initial_value: "0" }
   - { id: sim_bat, type: int, initial_value: "80" }
   - { id: sim_usb, type: bool, initial_value: "false" }
 
@@ -245,6 +257,22 @@ interval:
             std::string l = all.substr(i, j - i);
             if (!l.empty() && l.back() == '\r') l.pop_back();
             if (!l.empty() && l[0] == '{' && (changed || l.find("\"total\"") != std::string::npos)) id(buddy).feed_line(l);
+          }
+  - interval: 200ms  # fake voice (on_voice above): the words, as the bridge would send them
+    then:
+      - lambda: |-
+          static const char *const W[] = {"fix", "the", "failing", "test", "in", "the", "auth", "module"};
+          auto say = [](const char *key, int n) {
+            std::string t;
+            for (int i = 0; i < n; i++) t += (i ? " " : "") + std::string(W[i]);
+            id(buddy).feed_line(std::string("{\"evt\":\"voice\",\"") + key + "\":\"" + t + "\"}");
+          };
+          if (id(sim_voice_on)) {
+            int n = std::min<int>(8, (millis() - id(sim_voice_at)) / 400);
+            if (n != id(sim_voice_n)) say("text", id(sim_voice_n) = n);
+          } else if (id(sim_voice_final_at) && millis() >= id(sim_voice_final_at)) {
+            id(sim_voice_final_at) = 0;
+            say("final", std::max(id(sim_voice_n), 0));
           }
   - interval: 50ms  # the dial's IMU poll rate
     then:

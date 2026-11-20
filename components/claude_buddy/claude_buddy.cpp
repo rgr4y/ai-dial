@@ -95,8 +95,18 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     return;
   }
 
-  // Turn event: the assistant's text shows on the done card.
   if (const char *evt = doc["evt"]) {
+    // Voice: partial words, the final text, or an error (docs/DIAL-PROTOCOL.md "Voice").
+    if (strcmp(evt, "voice") == 0) {
+      VoiceLine &v = this->voice_;
+      v.final = !doc["final"].isNull();
+      v.text = v.final ? (doc["final"] | "") : (doc["text"] | "");
+      v.error = doc["error"] | "";
+      v.seq++;
+      this->notify_();
+      return;
+    }
+    // Turn event: the assistant's text shows on the done card.
     if (strcmp(evt, "turn") == 0 && strcmp(doc["role"] | "", "assistant") == 0) {
       for (JsonVariant b : doc["content"].as<JsonArray>()) {
         const char *t = b["text"];
@@ -114,6 +124,7 @@ void ClaudeBuddy::feed_line(const std::string &line) {
           this->last_text_ms_ = millis();
           this->last_bot_ = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
           this->last_agent_ = doc["agent"] | "";
+          this->last_sid_ = doc["sid"] | "";
           this->notify_();
           break;
         }

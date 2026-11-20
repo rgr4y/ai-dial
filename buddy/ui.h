@@ -68,6 +68,13 @@ static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_
 // Finger-scrolled card: autoscroll resumes this long after the last touch or scroll movement.
 static constexpr uint32_t CARD_MANUAL_MS = 5000;
 
+// Voice (hold the face): LISTEN while the finger is down, WAIT for the bridge's final text, CONFIRM shows it (a tap
+// cancels), SEND for one update (the bridge types it into the session), NOTE a short message. Protocol: DIAL-PROTOCOL.md.
+static constexpr uint32_t VOICE_CONFIRM_MS = 2000, VOICE_TAIL_MS = 300, VOICE_WAIT_MS = 10000, VOICE_NOTE_MS = 2000,
+                          VOICE_MAX_MS = 60000;  // tail: mic keeps running this long after release (buffered words)
+enum class Voice : uint8_t { OFF, LISTEN, WAIT, CONFIRM, SEND, NOTE };
+static const char *const VOICE_NAMES[] = {"off", "listening", "wait", "confirm", "send", "note"};
+
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
 enum class View : uint8_t { BRAND, FACE, PERMISSION, USAGE, BATTERY, OTA };
@@ -94,6 +101,11 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   bool viewing = false;  // a notice's reply is on the card (opened with the bell)
   esphome::claude_buddy::Notice notice;  // that reply
   size_t notice_n = 0;   // notices seen so far: a new one wakes the dial
+  Voice voice = Voice::OFF;
+  std::string voice_text, voice_sid;  // words on the card; the session they will be typed into (fixed at the hold)
+  uint32_t voice_at = 0, voice_stop_at = 0, voice_seen = 0;  // state entered; when to stop the mic; bridge lines seen
+  bool voice_stopped = true;
+  std::function<bool(bool)> on_voice;  // YAML: start (true) / stop (false) capture; start returns false if it can't
   lv_obj_t *usage = nullptr;  // usage screen: rebuilt from the snapshot's cards (build_usage)
   static constexpr int BURST_N = 18;
   lv_obj_t *burst[BURST_N] = {};     // bridge connected: green sparks fly out from the centre
@@ -384,6 +396,10 @@ inline void publish_state() {
     p["count"] = lv_label_get_text(u.perm_count);
   }
   if (vis(u.dots)) d["dots"] = u.dots_txt;
+  if (u.voice != Voice::OFF) {  // the bridge types on "send"; sid is where
+    d["voice"] = VOICE_NAMES[(int) u.voice];
+    if (!u.voice_sid.empty()) d["sid"] = u.voice_sid;
+  }
   if (vis(u.usage)) {
     JsonArray cards = d["usage"].to<JsonArray>();
     for (const auto &c : u.buddy->snap().usages) {
@@ -413,6 +429,7 @@ inline void on_root(lv_event_t *e) {
   lv_event_code_t code = lv_event_get_code(e);
   bool closable = u.view == View::USAGE || u.view == View::BATTERY;
   const char *t = nullptr;
+  if (code == LV_EVENT_GESTURE && u.voice != Voice::OFF) return;  // a slide while holding is not a swipe
   if (code == LV_EVENT_GESTURE) {
     lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
     bool right = dir == LV_DIR_RIGHT;
@@ -486,6 +503,10 @@ inline void tap(const std::string &t) {
   if (t == "boot") return boot(now);
   if (t == "screen") toggle_screen(now);
   if (was_asleep || t == "wake" || t == "screen") return update(now);  // a wake touch only wakes
+  if (t == "card" && u.voice != Voice::OFF) {  // the hold's own release lands as a card click: swallowed; in confirm it cancels
+    if (u.voice == Voice::CONFIRM) u.voice = Voice::OFF;
+    return update(now);
+  }
   if ((t == "allow" || t == "deny") && u.view == View::PERMISSION) {
     if (t == "allow") u.buddy->approve();
     else u.buddy->deny();
@@ -530,6 +551,50 @@ inline void tap(const std::string &t) {
   update(now);
 }
 
+// ---- voice ----
+inline void voice_note(const char *t, uint32_t now) {
+  Ui &u = ui();
+  u.voice = Voice::NOTE;
+  u.voice_text = t;
+  u.voice_at = now;
+}
+// The session the face is about: the focused working one, an opened notice's, or the one whose reply is on the card.
+// Empty when the face is about nobody (nothing to type into).
+inline std::string voice_target() {
+  Ui &u = ui();
+  ClaudeBuddy *b = u.buddy;
+  if (u.viewing) return u.notice.sid;
+  if (b->snap().running > 0) return u.focus_id;
+  if (!b->last_text().empty() && b->last_text_ms() > u.recap_cleared) return b->last_sid();
+  return "";
+}
+// Hold on the face (spec §3, 650 ms): start listening. The release is polled in tick().
+inline void on_hold(lv_event_t *) {
+  Ui &u = ui();
+  uint32_t now = lv_tick_get();
+  if (u.voice != Voice::OFF || u.view != View::FACE || u.asleep) return;
+  activity(now);
+  u.voice_sid = voice_target();
+  u.voice_text.clear();
+  if (u.voice_sid.empty()) {
+    voice_note("No session to talk to", now);
+  } else if (!u.on_voice || !u.on_voice(true)) {
+    voice_note("Voice is offline", now);
+  } else {
+    u.voice = Voice::LISTEN;
+    u.voice_at = now;
+    u.voice_stopped = false;
+  }
+  update(now);
+}
+// Stop capture once, whatever state the voice flow ends in.
+inline void voice_stop_mic() {
+  Ui &u = ui();
+  if (u.voice_stopped) return;
+  u.voice_stopped = true;
+  if (u.on_voice) u.on_voice(false);
+}
+
 // ---- build ----
 inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   Ui &u = ui();
@@ -542,8 +607,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_event_cb(root, on_root, LV_EVENT_GESTURE, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_SHORT_CLICKED, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_PRESSED, nullptr);  // any touch counts as activity
+  lv_obj_add_event_cb(root, on_hold, LV_EVENT_LONG_PRESSED, nullptr);  // hold = talk (the card's text bubbles to the card)
   if (lv_indev_t *in = lv_indev_get_next(nullptr)) {
-    lv_indev_set_long_press_time(in, 650);  // spec §3: hold 650 ms (nothing handles the hold yet: kept free for voice)
+    lv_indev_set_long_press_time(in, 650);  // spec §3: hold 650 ms
   }
 
   u.scene.create(root);
@@ -558,6 +624,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.card = mk_card(root);
   lv_obj_set_clickable(u.card, true);
   lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(u.card, on_hold, LV_EVENT_LONG_PRESSED, nullptr);  // hold on a reply talks to its session
   u.card_text = mk_label(u.card, u.f.f30, RECAP);
   lv_obj_set_width(u.card_text, 348);  // card 368 - 2 x 10 pad
   lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
@@ -902,6 +969,32 @@ inline void update(uint32_t now) {
   if (notices.size() > u.notice_n) activity(now);  // a reply from another session wakes the dial
   u.notice_n = notices.size();
   if (u.deferred_id != s.prompt_id && !s.prompt_id.empty()) u.deferred_id.clear();
+  // Voice: a bridge line (words, final, error), then the timers: confirm -> send, wait / note give up, send -> off.
+  const auto &vl = b->voice();
+  if (vl.seq != u.voice_seen) {
+    u.voice_seen = vl.seq;
+    if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
+      u.voice_text = vl.text;
+    } else if (u.voice == Voice::WAIT && !vl.error.empty()) {
+      voice_note(vl.error.c_str(), now);
+    } else if (u.voice == Voice::WAIT && vl.final) {
+      if (vl.text.empty()) {
+        voice_note("Didn't catch that", now);
+      } else {
+        u.voice_text = vl.text;
+        u.voice = Voice::CONFIRM;
+        u.voice_at = now;
+      }
+    }
+  }
+  if (u.voice == Voice::SEND && now != u.voice_at) u.voice = Voice::OFF;
+  else if (u.voice == Voice::CONFIRM && now - u.voice_at >= VOICE_CONFIRM_MS) {
+    u.voice = Voice::SEND;  // published once: the bridge types the text; the face plays "Sent"
+    u.voice_at = now;
+    u.sent_at = now;
+    u.last_deny = false;
+  } else if (u.voice == Voice::WAIT && now - u.voice_at > VOICE_WAIT_MS) voice_note("No transcript", now);
+  else if (u.voice == Voice::NOTE && now - u.voice_at >= VOICE_NOTE_MS) u.voice = Voice::OFF;
   if (u.usage_open && now - u.usage_at > USAGE_SCREEN_MS) u.usage_open = false;
   if (u.battery_open && now - u.battery_at > USAGE_SCREEN_MS) u.battery_open = false;
   if (u.ota_on && u.ota_fail_at && now - u.ota_fail_at > OTA_FAIL_MS) u.ota_on = false, u.ota_fail_at = 0;
@@ -912,6 +1005,10 @@ inline void update(uint32_t now) {
            : u.usage_open                               ? View::USAGE
            : u.battery_open                             ? View::BATTERY
                                                         : View::FACE;
+  if (v != View::FACE && u.voice != Voice::OFF && u.voice != Voice::SEND) {  // words nobody can see are never sent
+    voice_stop_mic();
+    u.voice = Voice::OFF;
+  }
   if (v == View::PERMISSION && u.view != View::PERMISSION) activity(now);  // a new question wakes the dial
   if (v == View::FACE && u.view != View::FACE) pick_hint();
   bool entered = v != u.view;
@@ -1066,6 +1163,19 @@ inline void update(uint32_t now) {
     // a permission redraw in between resumes the scene rather than restarting it. Voice face bias 0 (focus.c:670).
     u.scene.play(deny ? deny : character::find("send"), u.sent_at, 0, nullptr, true);
     arc_text(u.status_arc, "Sent", RELAX_LINE);
+  } else if (u.voice != Voice::OFF) {
+    // Words on the reply card while holding, the final text for a moment (tap to cancel), or a short note.
+    u.scene.stop();
+    u.alert.stop();
+    vis.on(u.card);
+    bool live_words = u.voice == Voice::LISTEN || u.voice == Voice::WAIT;
+    show_card(cut(one_line(live_words && u.voice_text.empty() ? "\xE2\x80\xA6" : u.voice_text), RECAP_MAX), now);
+    if (u.voice == Voice::LISTEN) arc_text(u.status_arc, "Listening\xE2\x80\xA6", LIVE, true);
+    else if (u.voice == Voice::WAIT) arc_text(u.status_arc, "Transcribing\xE2\x80\xA6", RELAX_LINE);
+    else if (u.voice == Voice::CONFIRM) arc_text(u.status_arc, "Tap to cancel", RELAX_LINE);
+    else arc_text(u.status_arc, "", RELAX_LINE);
+    for (size_t i = 0; i < s.work.size(); i++)
+      if (s.work[i].id == u.voice_sid) title = sessions::label(s.work, (int) i);
   } else if (reading) {
     u.scene.stop();
     u.alert.stop();
@@ -1190,7 +1300,7 @@ inline void update(uint32_t now) {
   else arc_text(u.name_arc, name, provider_ink(name, NAME));
   // Plan usage: 3 s of every 15 s on the lower arc, over whatever the face shows there (Harness's display carries
   // "what your harness has spent today"; this is the plan's 5-hour / weekly use from the bridge).
-  if (!s.usage.empty() && !sending && now % USAGE_EVERY_MS < USAGE_SHOW_MS) {
+  if (!s.usage.empty() && !sending && u.voice == Voice::OFF && now % USAGE_EVERY_MS < USAGE_SHOW_MS) {
     arc_text(u.status_arc, s.usage.c_str(), usage_ink(s.usage_pct, provider_ink(s.usage, RELAX_LINE)));
     // Nearly out: the pet steps aside for a pulsing red percentage (no scared/alarmed pet art exists in Harness).
     if (s.usage_pct >= USAGE_ALARM_PCT && !recap) {
@@ -1310,6 +1420,14 @@ inline void tick(uint32_t now) {
     resume_card_anim();
     update(now);  // a turn that started while reading takes the face now
   }
+  if (u.voice == Voice::LISTEN &&
+      (lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED || now - u.voice_at > VOICE_MAX_MS)) {
+    u.voice = Voice::WAIT;  // finger up: keep the mic open for the tail, then wait for the final text
+    u.voice_at = now;
+    u.voice_stop_at = now + VOICE_TAIL_MS;
+    update(now);
+  }
+  if (u.voice == Voice::WAIT && now >= u.voice_stop_at) voice_stop_mic();
   static uint8_t in_usage = 0;  // start/end the usage flash on time, not on the next 1 s update
   uint8_t w = (uint8_t) std::min<uint32_t>(now % USAGE_EVERY_MS / USAGE_SHOW_MS, 2);
   if (w != in_usage) {
