@@ -888,8 +888,10 @@ inline void resume_card_anim() {
   lv_anim_start(&a);
 }
 
-inline void show_card(const std::string &text, uint32_t now) {
+// Raw text in: one line, capped at RECAP_MAX codepoints.
+inline void show_card(const std::string &raw, uint32_t now) {
   Ui &u = ui();
+  const std::string text = cut(one_line(raw), RECAP_MAX);
   show(u.card, true);
   if (strcmp(lv_label_get_text(u.card_text), text.c_str()) != 0 || u.card_lines == 0) {
     // New text: measure it at full height, then pin to 4 lines and scroll the rest through.
@@ -1226,7 +1228,7 @@ inline void update(uint32_t now) {
     u.alert.stop();
     vis.on(u.card);
     bool live_words = u.voice == Voice::LISTEN || u.voice == Voice::WAIT;
-    show_card(cut(one_line(live_words && u.voice_text.empty() ? "\xE2\x80\xA6" : u.voice_text), RECAP_MAX), now);
+    show_card(live_words && u.voice_text.empty() ? "\xE2\x80\xA6" : u.voice_text, now);
     if (u.voice == Voice::LISTEN) arc_text(u.status_arc, "Listening\xE2\x80\xA6", LIVE, true);
     else if (u.voice == Voice::WAIT) arc_text(u.status_arc, "Transcribing\xE2\x80\xA6", RELAX_LINE);
     else if (u.voice == Voice::CONFIRM) arc_text(u.status_arc, "Tap to cancel", RELAX_LINE);
@@ -1249,7 +1251,7 @@ inline void update(uint32_t now) {
     vis.on(u.card);
     vis.on(u.dismiss);
     who(bot, agent);
-    show_card(cut(one_line(text), RECAP_MAX), now);
+    show_card(text, now);
     arc_text(u.status_arc, "", RELAX_LINE);
   } else if (running) {
     bell_ok = true;
