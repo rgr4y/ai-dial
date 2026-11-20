@@ -1,0 +1,72 @@
+#pragma once
+#include "ui_widgets.h"
+
+namespace buddyui {
+
+// Finger up (or, for an ask, the timer / a tap): keep the mic open for the tail, then wait for the final text.
+inline void end_listen(uint32_t now) {
+  Ui &u = ui();
+  if (u.on_sound) u.on_sound(Sound::END);
+  u.voice = Voice::WAIT;
+  u.voice_ask = false;
+  u.voice_at = now;
+  u.voice_stop_at = now + VOICE_TAIL_MS;
+}
+
+// ---- voice ----
+inline void voice_note(const char *t, uint32_t now) {
+  Ui &u = ui();
+  if (u.on_sound) u.on_sound(Sound::ERROR);
+  u.voice = Voice::NOTE;
+  u.voice_text = t;
+  u.voice_at = now;
+}
+// Open the mic and enter LISTEN; ask marks the bridge's follow-up question (no finger, ends on a timer or a tap).
+inline void start_listen(uint32_t now, bool ask) {
+  Ui &u = ui();
+  if (!u.on_voice || !u.on_voice(true)) {
+    voice_note("Voice is offline", now);
+    return;
+  }
+  u.voice = Voice::LISTEN;
+  u.voice_ask = ask;
+  u.voice_at = now;
+  u.voice_stopped = false;
+  if (u.on_sound) u.on_sound(Sound::LISTENING);
+}
+// The session the face is about: the focused working one, an opened notice's, or the one whose reply is on the card.
+// Empty when the face is about nobody: the bridge router then needs a session name.
+inline std::string voice_target() {
+  Ui &u = ui();
+  ClaudeBuddy *b = u.buddy;
+  if (u.viewing) return u.notice.sid;
+  if (b->snap().running > 0) return u.focus_id;
+  if (!b->last_text().empty() && b->last_text_ms() > u.recap_cleared) return b->last_sid();
+  return "";
+}
+// Hold on the face (spec §3, 650 ms): start listening. The release is polled in tick().
+inline void on_hold(lv_event_t *) {
+  Ui &u = ui();
+  uint32_t now = lv_tick_get();
+  if (u.voice != Voice::OFF || u.view != View::FACE || u.asleep) return;
+  activity(now);
+  lv_point_t at = {};
+  if (lv_indev_t *in = lv_indev_active()) lv_indev_get_point(in, &at);
+  auto inside = [](lv_point_t p) { return hypotf(p.x - 233.0f, p.y - 233.0f) < VOICE_EDGE_R; };
+  if (!inside(u.press_pt) || !inside(at)) return;  // a grip at the rim, not a hold on the face
+  u.voice_sid = voice_target();
+  u.voice_text.clear();
+  u.voice_ask = false;
+  // No session on the face (idle, card dismissed) still listens: the bridge's router picks one by name, else asks.
+  start_listen(now, false);
+  update(now);
+}
+// Stop capture once, whatever state the voice flow ends in.
+inline void voice_stop_mic() {
+  Ui &u = ui();
+  if (u.voice_stopped) return;
+  u.voice_stopped = true;
+  if (u.on_voice) u.on_voice(false);
+}
+
+}  // namespace buddyui
