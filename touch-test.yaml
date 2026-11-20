@@ -1,0 +1,132 @@
+# Touch test for the dial: every finger the CST9220 reports is drawn as a numbered dot, with the count at the top.
+# Answers "does this panel do multitouch" (the ESPHome driver reads up to 5 points). Same board package as the
+# Buddy, no UI: flash it, test, then flash claude-buddy.yaml back.
+#   esphome run touch-test.yaml --device 10.0.0.11
+# Logs each update too: "touch: n=2 #0 (233,120) r=113 #1 (180,300) r=85". The grey ring is the candidate
+# edge-rejection radius (edge_r): dots outside it draw faded. Holding hold_ms shows VOICE (press and hold point both
+# inside edge_r, the rule in bead v5o) or REJECTED.
+
+substitutions:
+  name: touch-test
+  friendly_name: Touch Test
+  edge_r: "160"  # voice edge-rejection radius (panel radius 233): touches outside it draw faded
+  hold_ms: "650"  # face hold time (ui.h)
+
+packages:
+  base: !include ../esphome/chicken-base.yaml
+  board: !include dial-hardware.yaml
+
+touchscreen:
+  - id: !extend touch
+    on_update:
+      - lambda: |-
+          lv_obj_t *dots[5] = {id(dot0), id(dot1), id(dot2), id(dot3), id(dot4)};
+          size_t n = touches.size();
+          char line[160];
+          int len = snprintf(line, sizeof(line), "n=%u", (unsigned) n);
+          for (size_t i = 0; i < 5; i++) {
+            if (i < n) {
+              const auto &t = touches[i];
+              lv_obj_set_pos(dots[i], t.x - 30, t.y - 30);
+              lv_obj_set_hidden(dots[i], false);
+              // Edge rejection check: distance from centre (233,233); outside EDGE_R the dot turns grey.
+              int r = (int) hypotf(t.x - 233.0f, t.y - 233.0f);
+              lv_obj_set_style_bg_opa(dots[i], r > ${edge_r} ? LV_OPA_40 : LV_OPA_COVER, 0);
+              len += snprintf(line + len, sizeof(line) - len, " #%u (%u,%u) r=%d", t.id, t.x, t.y, r);
+            } else {
+              lv_obj_set_hidden(dots[i], true);
+            }
+          }
+          lv_label_set_text_fmt(id(count), "%u", (unsigned) n);
+          ESP_LOGI("touch", "%s", line);
+          // Voice edge rejection (bead v5o), first finger only, as LVGL sees it: the press point and the point at
+          // hold time must both be inside edge_r. The verdict is drawn by the interval below.
+          if (n > 0) {
+            float r0 = hypotf(touches[0].x - 233.0f, touches[0].y - 233.0f);
+            if (!id(t_down)) {
+              id(t_down) = true;
+              id(t_start_ms) = millis();
+              id(t_start_in) = r0 < ${edge_r};
+              id(t_fired) = false;
+              lv_label_set_text(id(verdict), "");
+            }
+            id(t_now_in) = r0 < ${edge_r};
+          }
+    on_release:
+      - lambda: |-
+          lv_obj_t *dots[5] = {id(dot0), id(dot1), id(dot2), id(dot3), id(dot4)};
+          for (auto *d : dots) lv_obj_set_hidden(d, true);
+          lv_label_set_text(id(count), "0");
+          id(t_down) = false;
+          ESP_LOGI("touch", "released");
+
+globals:
+  - {id: t_down, type: bool, initial_value: "false"}
+  - {id: t_fired, type: bool, initial_value: "false"}
+  - {id: t_start_in, type: bool, initial_value: "false"}
+  - {id: t_now_in, type: bool, initial_value: "false"}
+  - {id: t_start_ms, type: uint32_t, initial_value: "0"}
+
+# The hold fires at hold_ms like the Buddy's face hold (ui.h on_hold, 650 ms). The touch controller only reports while
+# something changes, so the hold is timed here rather than on touch updates.
+interval:
+  - interval: 50ms
+    then:
+      - lambda: |-
+          if (!id(t_down) || id(t_fired) || millis() - id(t_start_ms) < ${hold_ms}) return;
+          id(t_fired) = true;
+          bool ok = id(t_start_in) && id(t_now_in);
+          lv_label_set_text(id(verdict), ok ? "VOICE" : "REJECTED");
+          lv_obj_set_style_text_color(id(verdict), lv_color_hex(ok ? 0x5CC47C : 0xC94A5A), 0);
+          ESP_LOGI("touch", "hold: %s (start %s, now %s)", ok ? "VOICE" : "REJECTED edge",
+                   id(t_start_in) ? "in" : "out", id(t_now_in) ? "in" : "out");
+
+lvgl:
+  displays: [disp]
+  buffer_size: 25%
+  style_definitions:
+    - id: dot
+      width: 60
+      height: 60
+      radius: 30
+      bg_opa: COVER
+      border_width: 0
+      text_color: 0x000000
+      text_font: montserrat_28
+  pages:
+    - id: page_main
+      scrollable: false  # a drag must not move the dots off their touch points
+      bg_color: 0x000000
+      widgets:
+        - label:
+            id: count
+            align: TOP_MID
+            y: 40
+            text: "0"
+            text_font: montserrat_48
+            text_color: 0xFFFFFF
+        - obj:  # the edge-rejection boundary
+            align: CENTER
+            width: 320  # 2 x edge_r
+            height: 320
+            radius: 160
+            bg_opa: TRANSP
+            border_width: 2
+            border_color: 0x444444
+            clickable: false
+        - label:  # hold verdict: VOICE (inside edge_r) or REJECTED
+            id: verdict
+            align: CENTER
+            y: 60
+            text: ""
+            text_font: montserrat_48
+        - label:
+            align: BOTTOM_MID
+            y: -50
+            text: "touch with 1-5 fingers"
+            text_color: 0x888888
+        - obj: {id: dot0, styles: dot, hidden: true, bg_color: 0xD97757, widgets: [label: {align: CENTER, text: "1"}]}
+        - obj: {id: dot1, styles: dot, hidden: true, bg_color: 0x5CC47C, widgets: [label: {align: CENTER, text: "2"}]}
+        - obj: {id: dot2, styles: dot, hidden: true, bg_color: 0x5C8CC4, widgets: [label: {align: CENTER, text: "3"}]}
+        - obj: {id: dot3, styles: dot, hidden: true, bg_color: 0xC4B45C, widgets: [label: {align: CENTER, text: "4"}]}
+        - obj: {id: dot4, styles: dot, hidden: true, bg_color: 0xB45CC4, widgets: [label: {align: CENTER, text: "5"}]}
