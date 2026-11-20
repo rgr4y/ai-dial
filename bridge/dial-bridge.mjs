@@ -23,9 +23,10 @@
 //
 // Voice: the dial's voice_assistant streams mic audio to this daemon (the API client that subscribed), which relays it
 // to a Wyoming STT server, sends the words back as {"evt":"voice"} lines and, when the dial says "send"
-// (buddy_ui voice), types the text into the iTerm session of the dial's sid. With ANTHROPIC_API_KEY set, router.mjs
-// (Haiku) first decides: a named session, a prompt answer, or a spoken reply. See docs/DIAL-PROTOCOL.md "Voice".
-// VOICE_ROUTER_TIMEOUT_MS (3000).
+// (buddy_ui voice), types the text into the iTerm session of the dial's sid. router.mjs first decides: name rules, then
+// one JSON call through the proxy at ANTHROPIC_BASE_URL (key ANTHROPIC_API_KEY, model VOICE_ROUTER_MODEL, default
+// gemini-3-flash): a named session, a prompt answer, or the assistant (tmux session VOICE_ASSISTANT_SESSION, "voice").
+// See docs/DIAL-PROTOCOL.md "Voice". VOICE_ROUTER_TIMEOUT_MS (3000).
 
 import { execFile } from 'node:child_process';
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, watch } from 'node:fs';
@@ -35,9 +36,8 @@ import { join, normalize, sep } from 'node:path';
 import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
 import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
-import Anthropic from '@anthropic-ai/sdk';
 import { route, sessionList } from './router.mjs';
-import { cleanText, openStt, registerVoiceMessages, typeIntoTty } from './voice.mjs';
+import { cleanText, openStt, registerVoiceMessages, tmuxHasSession, typeIntoTmuxSession, typeIntoTty } from './voice.mjs';
 
 const { Client, ServiceArgType } = esphome;
 const HOSTS = (process.env.DIAL_HOST || '10.0.0.11').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
@@ -47,7 +47,8 @@ const GROK_STORE = process.env.GROK_BOT_STORE || `${homedir()}/Library/Applicati
 const STT_HOST = process.env.VOICE_STT_HOST || '127.0.0.1';
 const STT_PORT = Number(process.env.VOICE_STT_PORT || 10300);
 const ROUTER_TIMEOUT_MS = Number(process.env.VOICE_ROUTER_TIMEOUT_MS || 3000);
-const router = process.env.ANTHROPIC_API_KEY ? new Anthropic() : null;  // key from env only; none = type into the focused session
+const ROUTER_ENV = { apiKey: process.env.ANTHROPIC_API_KEY, baseUrl: process.env.ANTHROPIC_BASE_URL };  // key from env only; none = no model call
+const ASSISTANT = process.env.VOICE_ASSISTANT_SESSION || 'voice';  // tmux session running the voice assistant Claude (make voice)
 const pb = registerVoiceMessages();  // before any connection: the API library lacks the voice message ids
 const KEEPALIVE_MS = 10000; // the dial treats 30 s of silence as gone
 
@@ -185,7 +186,7 @@ function voiceStop(dial) {
     const text = cleanText(raw), focusedId = dial.ui?.sid;
     if (!text) return say(dial, { error: "Didn't catch that" });
     const sessions = sessionList(board);
-    const r = await route({ text, sessions, focusedId, client: router, timeoutMs: ROUTER_TIMEOUT_MS });
+    const r = await route({ text, sessions, focusedId, env: ROUTER_ENV, timeoutMs: ROUTER_TIMEOUT_MS });
     log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
     const name = (sid) => sessions.find((s) => s.id === sid)?.name || sid;
     if (r.action === 'send') {
@@ -196,6 +197,16 @@ function voiceStop(dial) {
       }
       dial.pending = { run: () => typeSession(r.sid, r.text) };
       return say(dial, { final: r.sid === focusedId ? r.text : `${name(r.sid)}: ${r.text}` });
+    }
+    if (r.action === 'assistant') {
+      if (!(await tmuxHasSession(ASSISTANT))) {
+        log(`voice: assistant tmux session "${ASSISTANT}" not running, dropped`);
+        return say(dial, { error: 'Assistant offline' });  // never re-route to another session
+      }
+      dial.pending = { run: () => typeIntoTmuxSession(ASSISTANT, r.text).then(
+        (ok) => log(ok ? `voice: typed ${r.text.length} chars into assistant` : 'voice: assistant went away, dropped'),
+        (e) => log('voice: assistant tmux failed:', e.message)) };
+      return say(dial, { final: `Assistant: ${r.text}` });
     }
     if (r.action === 'answer') {
       const p = board.sessions.get(r.sid)?.prompt;
@@ -434,6 +445,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'GET' && req.url === '/status') {
     return res.writeHead(200, { 'content-type': 'application/json' })
       .end(JSON.stringify({ dials: dials.map((d) => ({ host: d.host, ready: d.ready, view: d.ui?.view })),
+                            sessions: sessionList(board).map((s) => ({ ...s, tty: board.tty(s.id) })),  // the voice assistant reads this
                             heartbeat: heartbeat(dials.find((d) => d.ready)) }, null, 2));
   }
   if (req.method !== 'POST') return res.writeHead(404).end();

@@ -134,11 +134,14 @@ dial   ui {voice:"confirm"}                              final text on the card 
 dial   ui {voice:"send"} (or voice gone = cancelled)     bridge types text + Return into the session's iTerm tab
 ```
 
-**Router.** Between audio-stop and `final`, the bridge may ask a small Claude (`bridge/router.mjs`, needs
-`ANTHROPIC_API_KEY`, 3 s limit) where the words go. The `final` line then carries what will happen on `send`: the text
-(focused session), `name: text` (another session), `Allow|Deny name: Tool` (answers that session's open prompt via the
-held PermissionRequest), or the router's spoken reply (nothing happens on `send`). No wire change: the dial still only
-sees `final`. No key, API error or timeout: behaves as without the router (types into `sid`), with a log line.
+**Router.** Between audio-stop and `final`, the bridge decides where the words go (`bridge/router.mjs`): name rules first
+("tell api to ...", "api, ...", bare allow/deny with one open prompt), else one JSON call (`{target, text}`, 3 s limit) to a
+fast model through cli-proxy-api. The `final` line then carries what will happen on `send`: the text (focused session),
+`name: text` (another session), `Assistant: text` (typed into the tmux session `voice`, a Claude that can act on the Mac),
+`Allow|Deny name: Tool` (answers that session's open prompt via the held PermissionRequest), or the router's spoken reply
+(nothing happens on `send`). No wire change: the dial still only sees `final`, or `error` ("Assistant offline" when the
+`voice` tmux session is not running, "Which session? Say its name" when none is on the face and none is named). API error,
+junk or timeout: types into `sid`, or goes to the assistant when `sid` is empty, with a log line.
 
 - Lines carry one of `text` (partial), `final` (the transcript; empty = nothing heard) or `error` (shown for 2 s).
 - The bridge only types text it produced itself for that dial (`final`), into the terminal of `sid`

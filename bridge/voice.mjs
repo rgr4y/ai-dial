@@ -138,15 +138,31 @@ async function tmuxPane(tty) {
   return out.split('\n').map((l) => l.split(' ')).find(([t]) => t === `/dev/${tty}`)?.[1] ?? null;
 }
 
+async function tmuxType(target, msg) {
+  await run(TMUX, ['send-keys', '-t', target, '-l', msg]);
+  await new Promise((r) => setTimeout(r, 300));
+  await run(TMUX, ['send-keys', '-t', target, 'Enter']);
+}
+
+// A tmux session by name ("voice", the assistant): `=name:` matches exactly, never as a prefix, and means its active pane.
+export async function tmuxHasSession(name) {
+  return !!TMUX && run(TMUX, ['has-session', '-t', `=${name}`]).then(() => true, () => false);
+}
+// Resolves true when typed, false when the session is not running (or the text has no words).
+export async function typeIntoTmuxSession(name, text) {
+  const msg = cleanText(text);
+  if (!/[\p{L}\p{N}]/u.test(msg) || !(await tmuxHasSession(name))) return false;
+  await tmuxType(`=${name}:`, msg);
+  return true;
+}
+
 // Resolves true when typed, false when no tmux pane or iTerm session has that tty. Rejects on tmux/osascript failure.
 export async function typeIntoTty(tty, text) {
   const msg = cleanText(text);
   if (!/^ttys\d+$/.test(tty || '') || !/[\p{L}\p{N}]/u.test(msg)) return false;  // no words (STT heard only ".")
   const pane = await tmuxPane(tty);
   if (pane) {
-    await run(TMUX, ['send-keys', '-t', pane, '-l', msg]);
-    await new Promise((r) => setTimeout(r, 300));
-    await run(TMUX, ['send-keys', '-t', pane, 'Enter']);
+    await tmuxType(pane, msg);
     return true;
   }
   return new Promise((res, rej) => {
