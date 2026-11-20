@@ -178,7 +178,10 @@ const say = (dial, o) => sendLine({ evt: 'voice', ...o }, dial);
 function voiceStart(dial) {
   dial.stt?.abort();
   dial.pending = null;
-  if (!dial.ask?.armed) dial.ask = null;  // a new hold drops a question; the re-listen it armed is not one
+  // A new hold drops a question; the re-listen it armed is not one. The arm is spent by that one start, and lapses if
+  // the dial never started it (mic failed), so a later hold is routed normally, not taken as a session name.
+  if (dial.ask?.armed && Date.now() - dial.ask.armedAt < ASK_ARM_MS) dial.ask.armed = false;
+  else dial.ask = null;
   const res = new pb.VoiceAssistantResponse();  // port 0: audio comes over the API connection
   res.setPort(0);
   res.setError(false);
@@ -250,12 +253,13 @@ function queueSend(dial, sid, text, sessions, focusedId) {
 // No session to send to: say "Which session?", and only once it has finished playing (or failed) tell the dial to listen
 // again, so the mic does not hear the question. dial.ask holds the original text until the answer, a new hold, or an
 // empty / unmatched answer; `armed` marks the re-listen's own voiceStart as not a new hold.
-const ASK = 'Which session?';
+const ASK = 'Which session?', ASK_ARM_MS = 3000;  // the dial starts the re-listen well inside this
 function askSession(dial, text) {
   const ask = dial.ask = { text, armed: false };
   speak(dial, ASK).catch((e) => log('voice: ask speak failed:', e.message)).then(() => {
     if (dial.ask !== ask || !dial.ready) return;  // a new hold took over
     ask.armed = true;
+    ask.armedAt = Date.now();
     say(dial, { ask: ASK });
   });
 }
@@ -279,12 +283,31 @@ function waitPlayed(dial, ms) {
     };
   });
 }
-async function speak(dial, text) {
+// Until the player leaves PLAYING (an earcon still going), or ms. Resolves at once if it isn't playing.
+function waitIdle(dial, ms) {
+  if (dial.playerState !== PLAYING) return Promise.resolve();
+  return new Promise((res) => {
+    const end = () => { clearTimeout(t); dial.onPlayer = null; res(); };
+    const t = setTimeout(end, ms);
+    dial.onPlayer = (st) => { if (st !== PLAYING) end(); };
+  });
+}
+// One speak at a time per dial: dial.onPlayer has one slot, and a second announcement's state changes would otherwise
+// end the first one's wait early or leave it to time out.
+function speak(dial, text) {
   dial ??= dials.find((d) => d.ready && d.playerKey != null);
+  if (!dial) return log('speak: no dial with a media player'), Promise.resolve(false);
+  const run = (dial.speaking ?? Promise.resolve()).then(() => speakNow(dial, text));
+  dial.speaking = run.catch(() => {});
+  return run;
+}
+async function speakNow(dial, text) {
   const addr = dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
   if (!dial?.ready || dial.playerKey == null || !addr) return log('speak: no dial with a media player'), false;
   const wav = await synthesize(text, { host: TTS_HOST, port: TTS_PORT });  // no voice: the server's default
   if (!wav) return false;
+  // An earcon (the end sound on release) may still be playing: its PLAYING -> IDLE must not count as this one's.
+  await waitIdle(dial, 3000);
   const url = `http://${addr}:${ASSETS_PORT}/tts/${stashTts(wav)}.wav`;
   const played = waitPlayed(dial, wavMs(wav));
   const m = new pb.MediaPlayerCommandRequest();  // the library's MediaPlayer entity has no announcement flag; the message does
