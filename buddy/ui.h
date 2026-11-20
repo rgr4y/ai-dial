@@ -1023,7 +1023,7 @@ inline void update(uint32_t now) {
     u.power_source(usb, now);
     int bat = u.battery ? u.battery() : -1;
     bool side = v == View::FACE && bat >= 0 && u.show_battery_side(usb, now);
-    show(u.bat_arc, side);
+    show(u.bat_arc, side && !(usb && bat > 80));  // charging above 80%: the bolt alone
     show(u.bat_bolt, side && usb);
     if (side) {
       char t[8];
@@ -1370,6 +1370,7 @@ inline void place_bat_bolt() {
   int w = 0;
   for (char c : u.bat_txt) w += lv_font_get_glyph_width(u.f.f26m, (uint8_t) c, 0);
   const float r = 205, deg = 3.14159265f / 180;
+  if (lv_obj_is_hidden(u.bat_arc)) w = -20;  // bolt alone: centred where the text would be
   float th = 180 + (w / 2.0f + 10) / r / deg;  // bolt centre angle
   float rot = (th + 90) * deg, cx = 233 + r * cosf(th * deg), cy = 233 + r * sinf(th * deg);
   float xs[4], ys[4], minx = 1e9f, miny = 1e9f;
