@@ -69,4 +69,38 @@ inline void voice_stop_mic() {
   if (u.on_voice) u.on_voice(false);
 }
 
+inline void voice_step(uint32_t now) {
+  Ui &u = ui();
+  ClaudeBuddy *b = u.buddy;
+  // Voice: a bridge line (words, final, error), then the timers: confirm -> send, wait / note give up, send -> off.
+  const auto &vl = b->voice();
+  if (vl.seq != u.voice_seen) {
+    u.voice_seen = vl.seq;
+    if (u.voice == Voice::WAIT && !vl.ask.empty()) {
+      u.voice_text = vl.ask;  // the question stays on the card while the mic re-arms
+      start_listen(now, true);
+    } else if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
+      u.voice_text = vl.text;
+    } else if (u.voice == Voice::WAIT && !vl.error.empty()) {
+      voice_note(vl.error.c_str(), now);
+    } else if (u.voice == Voice::WAIT && vl.final) {
+      if (vl.text.empty()) {
+        voice_note("Didn't catch that", now);
+      } else {
+        u.voice_text = vl.text;
+        u.voice = Voice::CONFIRM;
+        u.voice_at = now;
+      }
+    }
+  }
+  if (u.voice == Voice::SEND && now - u.voice_at >= VOICE_SEND_MS) u.voice = Voice::OFF;
+  else if (u.voice == Voice::CONFIRM && now - u.voice_at >= VOICE_CONFIRM_MS) {
+    u.voice = Voice::SEND;  // held VOICE_SEND_MS so the bridge sees it: it types the text; the face plays "Sent"
+    u.voice_at = now;
+    u.sent_at = now;
+    u.last_deny = false;
+  } else if (u.voice == Voice::WAIT && now - u.voice_at > VOICE_WAIT_MS) voice_note("No transcript", now);
+  else if (u.voice == Voice::NOTE && now - u.voice_at >= VOICE_NOTE_MS) u.voice = Voice::OFF;
+}
+
 }  // namespace buddyui

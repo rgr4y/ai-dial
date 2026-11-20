@@ -167,9 +167,32 @@ inline Ui &ui() {
   static Ui u;
   return u;
 }
+inline void show(lv_obj_t *o, bool on);
+inline void publish_state();
+// Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
+struct Vis {
+  Ui &u;
+  lv_obj_t *o[11];
+  bool want[11] = {};
+  explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.dots, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
+  void on(lv_obj_t *x) {
+    for (int i = 0; i < 11; i++)
+      if (o[i] == x) want[i] = true;
+  }
+  ~Vis() {
+    for (int i = 0; i < 11; i++) show(o[i], want[i]);
+    publish_state();
+  }
+};
+// What one update() worked out before painting; the view painters read it.
+struct Frame {
+  uint32_t now;
+  bool live, running, entered, usb, sending;
+  int fi, bat;                              // focused work index (-1: none), battery % (-1: no cell)
+  const esphome::claude_buddy::Work *fw;    // the focused working session, or nullptr
+};
 void update(uint32_t now);
 inline void tap(const std::string &t);
-inline void publish_state();
 inline void place_bat_bolt();
 
 }  // namespace buddyui

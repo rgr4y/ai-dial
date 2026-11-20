@@ -391,35 +391,7 @@ inline void update(uint32_t now) {
     u.notice_n = notices.size();
   }
   if (u.deferred_id != s.prompt_id && !s.prompt_id.empty()) u.deferred_id.clear();
-  // Voice: a bridge line (words, final, error), then the timers: confirm -> send, wait / note give up, send -> off.
-  const auto &vl = b->voice();
-  if (vl.seq != u.voice_seen) {
-    u.voice_seen = vl.seq;
-    if (u.voice == Voice::WAIT && !vl.ask.empty()) {
-      u.voice_text = vl.ask;  // the question stays on the card while the mic re-arms
-      start_listen(now, true);
-    } else if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
-      u.voice_text = vl.text;
-    } else if (u.voice == Voice::WAIT && !vl.error.empty()) {
-      voice_note(vl.error.c_str(), now);
-    } else if (u.voice == Voice::WAIT && vl.final) {
-      if (vl.text.empty()) {
-        voice_note("Didn't catch that", now);
-      } else {
-        u.voice_text = vl.text;
-        u.voice = Voice::CONFIRM;
-        u.voice_at = now;
-      }
-    }
-  }
-  if (u.voice == Voice::SEND && now - u.voice_at >= VOICE_SEND_MS) u.voice = Voice::OFF;
-  else if (u.voice == Voice::CONFIRM && now - u.voice_at >= VOICE_CONFIRM_MS) {
-    u.voice = Voice::SEND;  // held VOICE_SEND_MS so the bridge sees it: it types the text; the face plays "Sent"
-    u.voice_at = now;
-    u.sent_at = now;
-    u.last_deny = false;
-  } else if (u.voice == Voice::WAIT && now - u.voice_at > VOICE_WAIT_MS) voice_note("No transcript", now);
-  else if (u.voice == Voice::NOTE && now - u.voice_at >= VOICE_NOTE_MS) u.voice = Voice::OFF;
+  voice_step(now);
   if (u.usage_open && now - u.usage_at > USAGE_SCREEN_MS) u.usage_open = false;
   if (u.battery_open && now - u.battery_at > USAGE_SCREEN_MS) u.battery_open = false;
   if (u.ota_on && u.ota_fail_at && now - u.ota_fail_at > OTA_FAIL_MS) u.ota_on = false, u.ota_fail_at = 0;
@@ -470,22 +442,9 @@ inline void update(uint32_t now) {
   }
 
   // Everything off, then switch on what this view uses.
-  // Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
-  struct Vis {
-    Ui &u;
-    lv_obj_t *o[11];
-    bool want[11] = {};
-    explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.dots, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
-    void on(lv_obj_t *x) {
-      for (int i = 0; i < 11; i++)
-        if (o[i] == x) want[i] = true;
-    }
-    ~Vis() {
-      for (int i = 0; i < 11; i++) show(o[i], want[i]);
-      publish_state();
-    }
-  } vis{u};
+  Vis vis{u};
   bool sending = now - u.sent_at < SEND_MS && u.sent_at;
+  [[maybe_unused]] Frame f{now, live, running, entered, usb, sending, fi, bat, fw};  // the view painters will read this
   const char *name = "Claude";
 
   // The pages stop the pet and the alert. Not hoisted into the face path: stop() clears sc, and a play() after it restarts.
