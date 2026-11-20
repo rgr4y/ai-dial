@@ -72,12 +72,6 @@ struct Scene {
   // layer's x, taken out while the IMU steers. layer -1: the scene has no separate eyes.
   struct Gaze { int8_t layer = -1, rx = 0, ry = 0; Vec<int16_t> look; } gaze;
 };
-// Small pet above the recap card: zoom 6/8 and 4/8 frame sets, one (frame, dy) loop.
-struct Small {
-  Frames z6, z4;
-  Vec<std::array<int8_t, 2>> loop;
-  uint16_t step_ms = 100;
-};
 
 struct Pt { int x, y; };
 

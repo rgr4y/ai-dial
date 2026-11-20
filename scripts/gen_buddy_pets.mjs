@@ -11,7 +11,7 @@
 //                              lv_image_compressed_t's 12-byte header and the RGB565A8 bytes (RGB565 plane, A8 plane)
 //                              in LVGL's RLE on 2-byte blocks. The dial expands each frame once into PSRAM at load.
 //   <out>/manifest.json        rev, every file's size + sha256, frame sets, scene tables (per-step body frame, step dy,
-//                              overlay frame + offset, juggling discs, alert count position) and the small pet's loop.
+//                              overlay frame + offset, juggling discs, alert count position).
 //                              buddy/scene.h plays them with the same maths as focus.c (origin, step, overlay).
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -100,16 +100,8 @@ for (const [name, fr] of Object.entries(scriptedSets)) {
 }
 Object.assign(scenes, scriptedScenes);
 
-// Small pet above the recap / question card: 1.5x (zoom 6/8 of the 2x art) at <= 3 text lines, 1x (4/8) at 4
-// (focus.c:886-889). 4 state loops of (frame, dy) at step_ms; all four are identical for Claude (pets.c:18).
-const small = {
-  z6: frames({ dir: pet.zoom['6'], n: pet.small.n }, 'claude_small_z6'),
-  z4: frames({ dir: pet.zoom['4'], n: pet.small.n }, 'claude_small_z4'),
-  loop: pet.loops[0], step_ms: pet.step_ms[0], steps: pet.steps,
-};
-
-const rev = createHash('sha256').update(JSON.stringify([files, scenes, small])).digest('hex').slice(0, 16);
-const manifest = JSON.stringify({ name: 'claude', rev, files, sets, scenes, small });
+const rev = createHash('sha256').update(JSON.stringify([files, scenes])).digest('hex').slice(0, 16);
+const manifest = JSON.stringify({ name: 'claude', rev, files, sets, scenes });
 console.log(`frames: ${rawBytes >> 10} KB raw, ${packedBytes >> 10} KB packed in ${Object.keys(files).length} files`);
 let have = null;
 try { have = JSON.parse(readFileSync(join(OUT, 'manifest.json'), 'utf8')).rev; } catch {}

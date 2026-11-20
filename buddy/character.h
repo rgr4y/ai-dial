@@ -63,7 +63,6 @@ static constexpr const char *ROOT = "/littlefs";
 struct Pack {
   std::string rev;
   std::map<scene::Str, scene::Scene, std::less<>, scene::PsAlloc<std::pair<const scene::Str, scene::Scene>>> scenes;
-  scene::Small small;
 };
 inline Pack &pack() {
   static Pack p;
@@ -228,10 +227,6 @@ inline bool load(const char *name, void (*first)() = nullptr) {
     if (!need(kv.key().c_str())) return false;  // ponytail: an early relax stays up on a corrupt pack
   pk.rev = doc["rev"] | "";
   for (JsonPairConst kv : doc["scenes"].as<JsonObjectConst>()) build(kv.key().c_str(), kv.value());
-  JsonObjectConst sm = doc["small"];
-  pk.small.z6 = set(sm["z6"]), pk.small.z4 = set(sm["z4"]);
-  pk.small.loop = pairs<int8_t>(sm["loop"]);
-  pk.small.step_ms = sm["step_ms"] | 100;
   ESP_LOGI(TAG, "Loaded %s rev %s: %u scenes, %u KB PSRAM, %u ms", name, pk.rev.c_str(), (unsigned) pk.scenes.size(),
            (unsigned) ((before - heap_caps_get_free_size(MALLOC_CAP_SPIRAM)) >> 10), (unsigned) (esphome::millis() - t0));
   return true;
