@@ -88,6 +88,7 @@ struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 enum class View : uint8_t { BRAND, FACE, PERMISSION, USAGE, BATTERY, OTA };
 static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "usage", "battery", "ota"};
 
+enum class Sound { LISTENING, END, ERROR };  // earcons, played by the YAML on_sound callback
 struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: power.h
   Fonts f{};
   lv_obj_t *root = nullptr;
@@ -116,6 +117,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   uint32_t voice_at = 0, voice_stop_at = 0, voice_seen = 0;  // state entered; when to stop the mic; bridge lines seen
   bool voice_stopped = true;
   bool voice_ask = false;  // this LISTEN is the bridge's follow-up question: no finger, ends on a timer or a tap
+  std::function<void(Sound)> on_sound;  // YAML: play an earcon on the speaker; unset (sim) = silent
   std::function<bool(bool)> on_voice;  // YAML: start (true) / stop (false) capture; start returns false if it can't
   lv_obj_t *usage = nullptr;  // usage screen: rebuilt from the snapshot's cards (build_usage)
   static constexpr int BURST_N = 18;
@@ -508,6 +510,7 @@ inline void boot(uint32_t now) {
 // Finger up (or, for an ask, the timer / a tap): keep the mic open for the tail, then wait for the final text.
 inline void end_listen(uint32_t now) {
   Ui &u = ui();
+  if (u.on_sound) u.on_sound(Sound::END);
   u.voice = Voice::WAIT;
   u.voice_ask = false;
   u.voice_at = now;
@@ -574,6 +577,7 @@ inline void tap(const std::string &t) {
 // ---- voice ----
 inline void voice_note(const char *t, uint32_t now) {
   Ui &u = ui();
+  if (u.on_sound) u.on_sound(Sound::ERROR);
   u.voice = Voice::NOTE;
   u.voice_text = t;
   u.voice_at = now;
@@ -608,6 +612,7 @@ inline void on_hold(lv_event_t *) {
     u.voice = Voice::LISTEN;
     u.voice_at = now;
     u.voice_stopped = false;
+    if (u.on_sound) u.on_sound(Sound::LISTENING);
   }
   update(now);
 }
@@ -1019,6 +1024,7 @@ inline void update(uint32_t now) {
         u.voice_ask = true;
         u.voice_at = now;
         u.voice_stopped = false;
+        if (u.on_sound) u.on_sound(Sound::LISTENING);
       } else voice_note("Voice is offline", now);
     } else if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
       u.voice_text = vl.text;

@@ -57,6 +57,14 @@ esphome:
               id(va)->request_start(false, false);  // not continuous, no silence detection: the release ends it
               return true;
             };
+            // Earcons (buddy/ui.h on_sound), played as announcements so they cut over any media.
+            buddyui::ui().on_sound = [](buddyui::Sound s) {
+              switch (s) {
+                case buddyui::Sound::LISTENING: id(play_listening)->execute(); break;
+                case buddyui::Sound::END: id(play_stt_end)->execute(); break;
+                case buddyui::Sound::ERROR: id(play_error)->execute(); break;
+              }
+            };
             ESP_LOGI("buddy", "Free internal heap %u, largest block %u", heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
                      heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
 
@@ -222,6 +230,13 @@ speaker:
 media_player:
   - platform: speaker
     id: player
+    files:
+      - id: snd_listening
+        file: assets/sounds/on_stt_listening_16k_mono.wav
+      - id: snd_stt_end
+        file: assets/sounds/on_stt_end_16k_mono.wav
+      - id: snd_error
+        file: assets/sounds/on_error_16k_mono.wav
     name: Speaker  # named: an unnamed entity is internal (cv.py), and the bridge needs it over the API for /speak
     # Read buffer per pipeline, in PSRAM. The old dial config used 2MB for its MP3 stream; 512KB each here, since the
     # character pack also lives in PSRAM.
@@ -254,6 +269,21 @@ number:
           displayed_volume: !lambda "return x;"
 
 script:
+  - id: play_listening
+    then:
+      - media_player.speaker.play_on_device_media_file:
+          media_file: snd_listening
+          announcement: true
+  - id: play_stt_end
+    then:
+      - media_player.speaker.play_on_device_media_file:
+          media_file: snd_stt_end
+          announcement: true
+  - id: play_error
+    then:
+      - media_player.speaker.play_on_device_media_file:
+          media_file: snd_error
+          announcement: true
   - id: apply_current_volume
     parameters:
       displayed_volume: float
