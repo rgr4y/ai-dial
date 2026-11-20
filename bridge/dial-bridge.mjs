@@ -21,7 +21,7 @@
 // GROK_BOT_STORE (Grok Bot's store dir, watched read-only; skipped if absent).
 
 import { execFile } from 'node:child_process';
-import { createReadStream, existsSync, readdirSync, readFileSync, statSync, watch } from 'node:fs';
+import { closeSync, createReadStream, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, watch } from 'node:fs';
 import { createServer } from 'node:http';
 import { homedir } from 'node:os';
 import { join, normalize, sep } from 'node:path';
@@ -277,7 +277,30 @@ function body(req) {
   });
 }
 
+// A Claude Code session's /rename title: the transcript re-appends {"type":"custom-title","customTitle":...} every
+// few dozen lines, so the last 256 KB holds the current one. Read at most every 10 s per transcript; only files
+// under ~/.claude/projects (the hook payload is local, but it still names the path).
+const TITLE_TAIL = 256 * 1024, TITLE_EVERY_MS = 10000, titles = new Map();  // path -> { name, at }
+const PROJECTS = join(homedir(), '.claude', 'projects') + sep;
+function sessionName(path) {
+  if (typeof path !== 'string' || !normalize(path).startsWith(PROJECTS) || !path.endsWith('.jsonl')) return undefined;
+  const c = titles.get(path);
+  if (c && Date.now() - c.at < TITLE_EVERY_MS) return c.name;
+  let name;
+  try {
+    const fd = openSync(path, 'r');
+    const size = statSync(path).size, n = Math.min(size, TITLE_TAIL), buf = Buffer.alloc(n);
+    readSync(fd, buf, 0, n, size - n);
+    closeSync(fd);
+    const all = [...buf.toString('utf8').matchAll(/"customTitle":("(?:[^"\\]|\\.)*")/g)];
+    if (all.length) name = JSON.parse(all.at(-1)[1]) || undefined;
+  } catch {}
+  titles.set(path, { name, at: Date.now() });
+  return name;
+}
+
 function onEvent(ev) {
+  if (!ev.agent) ev.session_name ??= sessionName(ev.transcript_path);  // Claude Code only: others have no transcript title
   const r = board.event(ev, Date.now());
   if (r.cleared && waiters.has(r.cleared)) waiters.get(r.cleared)(null);
   if (r.turn) sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], ...r.speaker });

@@ -39,7 +39,8 @@ export class Board {
             prompt: null, pending: null };
       this.sessions.set(ev.session_id, s);
     }
-    if (ev.cwd) s.project = basename(ev.cwd);
+    if (ev.session_name) s.name = ev.session_name;  // Claude Code /rename title (dial-bridge.mjs): beats the dirname
+    if (ev.cwd || s.name) s.project = s.name || basename(ev.cwd);
     if (ev.agent) s.agent = ev.agent;  // hook.sh <agent>: not Claude Code (codex)
     if (ev.avatar) { s.avatar = ev.avatar; s.avatar_color = ev.avatar_color ?? 0xFFFFFF; }  // Grok Bot: its bot's look
     s.at = now;

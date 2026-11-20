@@ -130,3 +130,11 @@ test('a reply names its speaker: a Grok bot by its look, Codex by agent, Claude 
   assert.equal(r.turn, 'cc: Hi.');
   assert.equal(r.speaker, null);
 });
+
+test('a session name (Claude Code /rename) replaces the dirname', () => {
+  const b = new Board();
+  b.event(ev('UserPromptSubmit', { cwd: '/w/autonomous-ai', session_name: 'auto-ai' }), 1000);
+  assert.equal(b.heartbeat(1000).msg, 'auto-ai');
+  b.event(ev('PreToolUse', { cwd: '/w/autonomous-ai', tool_name: 'Bash' }), 1100);  // no name on this event: keeps it
+  assert.equal(b.heartbeat(1100).msg, 'auto-ai Bash');
+});
