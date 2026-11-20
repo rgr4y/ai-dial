@@ -394,7 +394,7 @@ inline void tick(uint32_t now) {
     // Bounce in, pulse twice a second, bounce out, across the 3 s usage flash. 256 = 1x.
     uint32_t t = now % USAGE_EVERY_MS;
     float env = std::min(1.0f, std::min(t / 250.0f, (USAGE_SHOW_MS - (float) std::min(t, USAGE_SHOW_MS)) / 250.0f));
-    float k = env * (1.0f + 0.15f * sinf(t * 2 * 3.14159f / 500));
+    float k = env * (1.0f + 0.15f * sinf(t * 2 * PI_F / 500));
     lv_obj_set_style_transform_scale(u.alarm, (int32_t) (256 * k), 0);
   }
   if (u.card_manual && !u.asleep && !lv_obj_is_hidden(u.card) && now - u.card_manual_at >= CARD_MANUAL_MS &&

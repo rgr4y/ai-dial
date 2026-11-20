@@ -49,6 +49,7 @@ inline uint32_t provider_ink(const std::string &name, uint32_t other = TEXT) {
 // Voice edge rejection: a hold starts listening only if it began and is still inside this radius (px from the centre,
 // screen radius 233). touch-test.yaml: picking the dial up lands at r 173-240, sometimes held 0.5-1 s.
 static constexpr float VOICE_EDGE_R = 160;
+static constexpr float PI_F = 3.14159265f;
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
 static constexpr uint32_t USB_SLEEP_MS = 900000;  // on USB the screen goes dark after this long truly idle (AMOLED burn-in)
 static constexpr uint32_t BOOT_AWAKE_MS = 60000; // never idle-sleep in the first minute after boot

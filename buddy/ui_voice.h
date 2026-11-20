@@ -52,7 +52,7 @@ inline void on_hold(lv_event_t *) {
   activity(now);
   lv_point_t at = {};
   if (lv_indev_t *in = lv_indev_active()) lv_indev_get_point(in, &at);
-  auto inside = [](lv_point_t p) { return hypotf(p.x - 233.0f, p.y - 233.0f) < VOICE_EDGE_R; };
+  auto inside = [](lv_point_t p) { return hypotf(p.x - (float) scene::C, p.y - (float) scene::C) < VOICE_EDGE_R; };
   if (!inside(u.press_pt) || !inside(at)) return;  // a grip at the rim, not a hold on the face
   u.voice_sid = voice_target();
   u.voice_text.clear();

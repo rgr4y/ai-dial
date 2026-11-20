@@ -10,11 +10,11 @@ inline void burst_step(void *, int32_t v) {
   Ui &u = ui();
   float t = v / 1000.0f, e = 1 - (1 - t) * (1 - t) * (1 - t);  // ease-out cubic
   for (int i = 0; i < Ui::BURST_N; i++) {
-    float a = i * 6.2832f / Ui::BURST_N;
+    float a = i * 2 * PI_F / Ui::BURST_N;
     int r = (int) (u.burst_r[i] * e);
     int d = (int) (14 * (1 - t)) + 3;
     lv_obj_set_size(u.burst[i], d, d);
-    lv_obj_set_pos(u.burst[i], 233 + (int) (cosf(a) * r) - d / 2, 233 + (int) (sinf(a) * r) - d / 2);
+    lv_obj_set_pos(u.burst[i], scene::C + (int) (cosf(a) * r) - d / 2, scene::C + (int) (sinf(a) * r) - d / 2);
     lv_obj_set_style_bg_opa(u.burst[i], (lv_opa_t) (255 * (1 - t * t)), 0);
   }
 }
@@ -104,10 +104,10 @@ inline void place_bat_bolt() {
   static const float BOLT[4][2] = {{9, 0}, {1, 12}, {11, 12}, {3, 22}};  // centre (6, 11)
   int w = 0;
   for (char c : u.bat_txt) w += lv_font_get_glyph_width(u.f.f26m, (uint8_t) c, 0);
-  const float r = 205, deg = 3.14159265f / 180;
+  const float r = 205, deg = PI_F / 180;
   if (lv_obj_is_hidden(u.bat_arc)) w = -20;  // bolt alone: centred where the text would be
   float th = 180 + (w / 2.0f + 10) / r / deg;  // bolt centre angle
-  float rot = (th + 90) * deg, cx = 233 + r * cosf(th * deg), cy = 233 + r * sinf(th * deg);
+  float rot = (th + 90) * deg, cx = scene::C + r * cosf(th * deg), cy = scene::C + r * sinf(th * deg);
   float xs[4], ys[4], minx = 1e9f, miny = 1e9f;
   for (int i = 0; i < 4; i++) {
     float dx = BOLT[i][0] - 6, dy = BOLT[i][1] - 11;

@@ -71,18 +71,12 @@ inline lv_obj_t *mk_fill(lv_obj_t *parent, int32_t w, int32_t h, int32_t radius,
 inline lv_obj_t *mk_card(lv_obj_t *parent) {
   // Recap card: radius 24, fill 0x1c1e26, rim 0x3d3f47 (focus.c:879-885). Harness x 41 w 384 clipped the round
   // glass at 4 lines (bottom corners at r ~234) and touched the face-side battery %: x 49 w 368 keeps r <= 228.
-  lv_obj_t *c = lv_obj_create(parent);
-  lv_obj_remove_style_all(c);
-  lv_obj_set_style_bg_color(c, lv_color_hex(CARD), 0);
-  lv_obj_set_style_bg_opa(c, LV_OPA_COVER, 0);
+  lv_obj_t *c = mk_fill(parent, 368, LV_SIZE_CONTENT, 24, CARD);
   lv_obj_set_style_border_color(c, lv_color_hex(CARD_RIM), 0);
   lv_obj_set_style_border_width(c, 2, 0);
-  lv_obj_set_style_radius(c, 24, 0);
   lv_obj_set_style_pad_hor(c, 10, 0);
   lv_obj_set_style_pad_ver(c, 21, 0);
   lv_obj_set_x(c, 49);
-  lv_obj_set_width(c, 368);
-  lv_obj_set_height(c, LV_SIZE_CONTENT);
   return c;
 }
 // Pill button sized to its label plus padding, centred across the screen (set_y places it). Filled in its kind's
