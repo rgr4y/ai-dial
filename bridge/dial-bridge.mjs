@@ -73,6 +73,10 @@ const waiters = new Map(); // prompt id -> resolve(decision | null)
 const dials = HOSTS.map((host) => ({ host, client: null, lineKey: null, tapKey: null, decisionKey: null, uiKey: null,
                                      ready: false, ui: null, lastErr: null, stt: null, pending: null, ask: null, playerKey: null, playerState: null, onPlayer: null }));
 const anyReady = () => dials.some((d) => d.ready);
+// The address the dial reaches us at: our end of its API connection.
+function localAddr(dial) {
+  return dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
+}
 
 function connectDial(dial) {
   const client = new Client({
@@ -187,7 +191,7 @@ const { voiceStart, voiceStop, speak, onUiForVoice, takeTalked } = createVoiceFl
   chat: (text) => chat({ text, env: ROUTER_ENV }),
   synthesize: (text) => synthesize(text, { host: TTS_HOST, port: TTS_PORT }), stashTts, wavMs,
   ttsUrl: (addr, id) => `http://${addr}:${ASSETS_PORT}/tts/${id}.wav`,
-  localAddress: (dial) => dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, ''),
+  localAddress: localAddr,
   startResponse: (dial) => {
     const res = new pb.VoiceAssistantResponse();  // port 0: audio comes over the API connection
     res.setPort(0);
@@ -308,8 +312,7 @@ const ASSETS_PORT = Number(process.env.DIAL_ASSETS_PORT || 19877);
 const ASSETS_DIR = join(import.meta.dirname, 'assets');
 const CHARACTER = 'claude';
 function assetsLine(dial) {
-  // The address the dial sees us at: our end of the API connection.
-  const local = dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
+  const local = localAddr(dial);
   if (!local) return null;
   try {
     const { rev } = JSON.parse(readFileSync(join(ASSETS_DIR, CHARACTER, 'manifest.json'), 'utf8'));
