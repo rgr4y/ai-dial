@@ -80,19 +80,33 @@ int main() {
   if (hit(cx(PWR), cy(PWR)) == PWR) sim.toggle(20);
   assert(!sim.asleep && tick(sim).wake);
 
-  // idle_due: battery times out, USB never, not during boot, not when asleep.
+  // idle_due: battery times out (busy ignored), USB only when idle for usb_sleep_ms and not busy, not during boot,
+  // not when asleep.
+  const uint32_t SL = 300000, USL = 900000;
   power::Screen idle;
   idle.last_activity = 1000;
-  assert(!idle.idle_due(1000 + 300000, 5000, 300000, false));  // exactly at the timeout: not yet
-  assert(idle.idle_due(1000 + 300001, 5000, 300000, false));
-  assert(!idle.idle_due(1000 + 300001, 5000, 300000, true));   // USB
-  assert(!idle.idle_due(3000, 5000, 1000, false));              // inside boot_awake_ms
+  assert(!idle.idle_due(1000 + SL, 5000, SL, USL, false, false));  // exactly at the timeout: not yet
+  assert(idle.idle_due(1000 + SL + 1, 5000, SL, USL, false, false));
+  assert(idle.idle_due(1000 + SL + 1, 5000, SL, USL, false, true));  // battery ignores busy
+  assert(!idle.idle_due(3000, 5000, 1000, USL, false, false));       // inside boot_awake_ms
+  // USB: the long timeout, and never while busy.
+  assert(!idle.idle_due(1000 + SL + 1, 5000, SL, USL, true, false));
+  assert(!idle.idle_due(1000 + USL, 5000, SL, USL, true, false));
+  assert(idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, false));
+  assert(!idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, true));
   idle.set_asleep(true);
-  assert(!idle.idle_due(1000 + 300001, 5000, 300000, false));  // already asleep
+  assert(!idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, false));  // already asleep
   idle.set_asleep(false);
-  // Unplug after a long idle on USB: due on the next tick (battery rules, no grace period).
-  assert(!idle.idle_due(900000, 5000, 300000, true));
-  assert(idle.idle_due(900001, 5000, 300000, false));
+  // Wake from dark on USB: activity() lights it and restarts the USB timer.
+  idle.set_asleep(true);
+  assert(idle.activity(2000000) && !idle.asleep);
+  assert(!idle.idle_due(2000000 + USL, 5000, SL, USL, true, false));
+  assert(idle.idle_due(2000000 + USL + 1, 5000, SL, USL, true, false));
+  // Unplug after a long idle on USB (not busy): due on the next tick (battery rules, no grace period).
+  power::Screen un;
+  un.last_activity = 1000;
+  assert(!un.idle_due(1000 + SL + 1, 5000, SL, USL, true, false));
+  assert(un.idle_due(1000 + SL + 2, 5000, SL, USL, false, false));
 
   // battery_ink: anchors exact, blend between, clamped.
   assert(power::battery_ink(10) == 0xcd3131 && power::battery_ink(50) == 0xe5e510 && power::battery_ink(90) == 0x3fb950);

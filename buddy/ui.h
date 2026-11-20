@@ -53,6 +53,7 @@ inline uint32_t provider_ink(const std::string &name, uint32_t other = TEXT) {
 // screen radius 233). touch-test.yaml: picking the dial up lands at r 173-240, sometimes held 0.5-1 s.
 static constexpr float VOICE_EDGE_R = 160;
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
+static constexpr uint32_t USB_SLEEP_MS = 900000;  // on USB the screen goes dark after this long truly idle (AMOLED burn-in)
 static constexpr uint32_t BOOT_AWAKE_MS = 60000; // never idle-sleep in the first minute after boot
 static constexpr uint32_t OTA_FAIL_MS = 5000;  // failed-update page stays this long
 static constexpr int OTA_BAR_W = 300, OTA_BAR_MIN = 14;
@@ -1492,7 +1493,12 @@ inline void tick(uint32_t now) {
     last_state = now;
     update(now);
   }
-  if (u.idle_due(now, BOOT_AWAKE_MS, SLEEP_MS, u.on_usb && u.on_usb())) set_asleep(true);
+  {  // busy holds the USB screen lit: a session running, an open prompt, voice in use, or a reply card still up
+    ClaudeBuddy *b = u.buddy;
+    bool busy = b->snap().running > 0 || b->has_prompt() || u.voice != Voice::OFF || u.viewing ||
+                (!b->last_text().empty() && b->last_text_ms() > u.recap_cleared);
+    if (u.idle_due(now, BOOT_AWAKE_MS, SLEEP_MS, USB_SLEEP_MS, u.on_usb && u.on_usb(), busy)) set_asleep(true);
+  }
 }
 
 // OTA progress, called from the esphome OTA triggers (claude-buddy.yaml): 1 begin, 2 progress (pct), 0 end,
