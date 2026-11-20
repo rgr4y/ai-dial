@@ -14,6 +14,8 @@ agents ──hook JSON──▶ dial-bridge ──lines──▶ dial(s) (ESPHom
 `bridge/hook.sh` POSTs the hook's stdin unchanged. That JSON is Claude Code's hook input:
 `hook_event_name`, `session_id`, `cwd`, plus `tool_name`/`tool_input`, `last_assistant_message`, and so on.
 peon-ping's adapters (Codex, Cursor, Gemini, …) produce the same shape, and `bridge/peon-shim/peon.sh` tees it here.
+`hook.sh` also adds `"tty":"ttys003"` (`ps -o tty= -p $PPID`) when its parent has a terminal. The bridge keeps it per
+session (`Board.tty(session_id)`) so voice can type into that terminal; it never goes to the dial.
 
 | Endpoint | Body | Reply |
 |---|---|---|
@@ -43,6 +45,12 @@ Each line is one Claude desktop Hardware Buddy JSON object
   shape (a pack scene `grok_<avatar>`, from `art/grok/`) and colour (0xRRGGBB, from the roster). The dial plays
   that scene with its body tinted, in place of cook or build. Any hook event that carries `avatar` and
   `avatar_color` gives its session that look, so `curl` can test it.
+  `"work":[{"id":"s1","name":"auto-ai","tool":"Edit"},{"id":"s2","name":"auto-ai","tool":"Bash","agent":"codex"}]`
+  lists every working session, ordered by session start (stable, so swiping on the dial doesn't shuffle). `name` is the
+  session's `/rename` title, else its directory; `tool` is its current tool (empty at a prompt); `agent`, or `avatar`
+  plus `avatar_color`, as below. Absent when nothing works. `"latest":"s1"` is the id of the one that did something
+  last: the dial falls back to it when its focused session ends. The flat fields (`msg`, `agent`, `avatar`, …) still
+  describe that latest session, so firmware that ignores `work` behaves as before.
   `"agent":"codex"` or `"agent":"copilot"` appears when the session shown as working came through `hook.sh codex`
   or `hook.sh copilot` (installed in `~/.codex/hooks.json` and `~/.copilot/settings.json` by `bridge/install.mjs`).
   The dial plays `codex_work` or `copilot_work` in place of cook or build.
@@ -55,11 +63,14 @@ Each line is one Claude desktop Hardware Buddy JSON object
   usage. If CodexBar is down, the bridge falls back to Claude only, via `~/.claude/refresh-usage.sh` and
   `~/.claude/stats-usage.json`. The dial flashes the line on the lower arc for 3 s of every 15 s, amber at ≥80%
   and red at ≥95%. When the bridge sees that flash in `buddy_ui`, it switches to the next provider 4 s later, so
-  each flash shows a different one. The line also shows on the entries view.
+  each flash shows a different one.
 - **Turn.** Sent when a session stops with assistant text; it shows on the done card.
   ```json
   {"evt":"turn","role":"assistant","content":[{"type":"text","text":"api: All tests pass."}]}
   ```
+  `"sid":"<session id>"` names the session that wrote it. `"busy":2` appears when that many other sessions are still
+  working: the dial then keeps its face on them and queues the reply as a notice (the bell pill, "2 new") instead of
+  showing the card; tapping the bell opens the oldest. Without `busy` the card shows at once, as before.
   When the writer isn't Claude Code, the turn names it, using the heartbeat's keys. The card then shows that writer's
   name on the top arc:
   ```json
@@ -76,16 +87,16 @@ Each line is one Claude desktop Hardware Buddy JSON object
 
 **ui** (v1). Fields that are not on screen are left out.
 ```json
-{"v":1, "view":"brand|face|permission|entries|usage|battery|ota", "asleep":false,
- "name":"Claude",                                   // top arc
+{"v":1, "view":"brand|face|permission|usage|battery|ota", "asleep":false,
+ "name":"auto-ai ·2",                               // top arc: the focused session ("·2": the second with that name)
  "status":{"text":"Brewing… 0:12","color":"#00ff2f","shimmer":true},   // lower arc
  "scene":"claude_relax|claude_work|claude_build|claude_send",          // pet scene playing
  "alert":"2",                                       // alert bubble count on the working scene
  "card":"api: All tests pass.",                     // recap card (Dismiss button above it)
- "bell":"2 waiting",                                // bell pill
+ "bell":"2 waiting",                                // bell pill: "N waiting", "N new" (replies from other sessions)
+ "dots":"2/3",                                      // page dots (more than one session working): focused / working
  "word":"Claude", "sub":"Waiting for the bridge",   // brand view
  "perm":{"title":"Allow Bash?","hint":"api: rm -rf /tmp/x","count":"1 of 2 waiting"},
- "list":"07:42 api: Bash npm test\n…",              // entries view (hold the face)
  "alarm":"87%"}                                     // usage_pct >= 80 during the usage flash: red, pulsing, pet hidden
 ```
 Scenes and shimmer animate on the receiver's clock: the timing is fixed, so a mirror only needs the names.
@@ -98,10 +109,10 @@ Each target does exactly what the matching touch on the glass does (`buddy/ui.h`
 |---|---|
 | `allow` / `deny` | Answer the permission screen. |
 | `later` | Put the prompt off (swipe right / BOOT). The face shows the alert bubble or bell. |
-| `bell` | Reopen a put-off prompt. |
 | `card` | Dismiss the recap card. |
-| `hold` | Open the entries view (hold the face for 650 ms). |
-| `back` | Close the entries, usage or battery view. |
+| `bell` | Reopen a put-off prompt; from the bell pill also open the oldest queued reply and focus its session. |
+| `next` / `prev` | Swipe left / right on the face: focus the next / previous working session (wraps). |
+| `back` | Close the usage or battery view. |
 | `wake` | Wake the screen only. |
 | `screen` | PWR: screen on/off. |
 

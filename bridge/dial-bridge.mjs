@@ -303,7 +303,7 @@ function onEvent(ev) {
   if (!ev.agent) ev.session_name ??= sessionName(ev.transcript_path);  // Claude Code only: others have no transcript title
   const r = board.event(ev, Date.now());
   if (r.cleared && waiters.has(r.cleared)) waiters.get(r.cleared)(null);
-  if (r.turn) sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], ...r.speaker });
+  if (r.turn) sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], sid: r.sid, ...(r.busy && { busy: r.busy }), ...r.speaker });
   push();
 }
 

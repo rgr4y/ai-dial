@@ -138,3 +138,40 @@ test('a session name (Claude Code /rename) replaces the dirname', () => {
   b.event(ev('PreToolUse', { cwd: '/w/autonomous-ai', tool_name: 'Bash' }), 1100);  // no name on this event: keeps it
   assert.equal(b.heartbeat(1100).msg, 'auto-ai Bash');
 });
+
+test('work lists every working session in start order; latest is the one active last', () => {
+  const b = new Board();
+  const s = (id, cwd, extra = {}) => ({ ...ev('UserPromptSubmit', extra), session_id: id, cwd });
+  b.event(s('a', '/w/auto-ai'), 1000);
+  b.event(s('b', '/w/auto-ai', { session_name: 'api' }), 2000);
+  b.event(s('c', '/w/web', { agent: 'codex' }), 3000);
+  b.event({ ...ev('PreToolUse', { tool_name: 'Edit' }), session_id: 'a', cwd: '/w/auto-ai' }, 4000);  // a is newest, still first
+  const hb = b.heartbeat(4000);
+  assert.deepEqual(hb.work.map((w) => [w.id, w.name]), [['a', 'auto-ai'], ['b', 'api'], ['c', 'web']]);
+  assert.equal(hb.work[0].tool, 'Edit');
+  assert.equal(hb.work[2].agent, 'codex');
+  assert.equal(hb.latest, 'a');
+  assert.equal(hb.running, 3);  // flat fields unchanged for old firmware
+  assert.equal(hb.msg, 'auto-ai Edit');
+  b.event({ ...ev('Stop'), session_id: 'a' }, 5000);
+  assert.deepEqual(b.heartbeat(5000).work.map((w) => w.id), ['b', 'c']);
+  assert.equal(new Board().heartbeat(0).work, undefined);
+});
+
+test('a Grok Bot session in work carries its avatar', () => {
+  const b = new Board();
+  b.event(ev('UserPromptSubmit', { avatar: 'cloud', avatar_color: 0x00bca6 }), 1000);
+  assert.deepEqual(b.heartbeat(1000).work[0], { id: 's1', name: 'proj', tool: '', avatar: 'cloud', avatar_color: 0x00bca6 });
+});
+
+test('a turn says which session wrote it and how many others still work; the tty is kept per session', () => {
+  const b = new Board();
+  b.event({ ...ev('UserPromptSubmit', { tty: 'ttys003' }), session_id: 'a' }, 1000);
+  b.event({ ...ev('UserPromptSubmit', { tty: '??' }), session_id: 'b' }, 1000);
+  assert.equal(b.tty('a'), 'ttys003');
+  assert.equal(b.tty('b'), undefined);
+  let r = b.event({ ...ev('Stop', { last_assistant_message: 'Hi.' }), session_id: 'a' }, 2000);
+  assert.deepEqual([r.sid, r.busy], ['a', 1]);
+  r = b.event({ ...ev('Stop', { last_assistant_message: 'Yo.' }), session_id: 'b' }, 3000);
+  assert.deepEqual([r.sid, r.busy], ['b', 0]);
+});

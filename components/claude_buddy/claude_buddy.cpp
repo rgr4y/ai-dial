@@ -75,6 +75,11 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     s.bots.clear();
     for (JsonArray b : doc["bots"].as<JsonArray>())
       s.bots.push_back({b[0] | "", b[1] | 0xFFFFFFu, b[2] | ""});
+    s.work.clear();
+    for (JsonObject w : doc["work"].as<JsonArray>())
+      s.work.push_back({w["id"] | "", w["name"] | "", w["tool"] | "", w["agent"] | "",
+                        {w["avatar"] | "", w["avatar_color"] | 0xFFFFFFu, w["name"] | ""}});
+    s.latest = doc["latest"] | "";
     JsonObject p = doc["prompt"];
     s.prompt_id = p ? (p["id"] | "") : "";
     if (!s.prompt_id.empty() && s.prompt_id == this->answered_id_)
@@ -95,6 +100,15 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     if (strcmp(evt, "turn") == 0 && strcmp(doc["role"] | "", "assistant") == 0) {
       for (JsonVariant b : doc["content"].as<JsonArray>()) {
         const char *t = b["text"];
+        if (t && *t && (doc["busy"] | 0u) > 0) {
+          // Other sessions are still working: keep the face on them and queue this reply (the bell).
+          if (this->notices_.size() >= 9)
+            this->notices_.erase(this->notices_.begin());
+          this->notices_.push_back({doc["sid"] | "", t, doc["agent"] | "",
+                                    {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""}});
+          this->notify_();
+          break;
+        }
         if (t && *t) {
           this->last_text_ = t;
           this->last_text_ms_ = millis();

@@ -7,10 +7,13 @@
 # or no answer means no output, and Claude Code carries on as if this hook didn't exist.
 # An argument names the agent (`hook.sh codex` from ~/.codex/hooks.json, `hook.sh copilot` from
 # ~/.copilot/settings.json): it goes in as "agent", so the dial can show that agent's pet while it works. Claude Code
-# passes none.
+# passes none. The session's terminal goes in as "tty" (`ttys003`) when the parent process has one, so the dial can
+# type into it.
 URL="http://127.0.0.1:${DIAL_BRIDGE_PORT:-19876}"
 INPUT=$(cat)
 [ -n "$1" ] && INPUT="{\"agent\":\"$1\",${INPUT#*\{}"
+TTY=$(ps -o tty= -p $PPID 2>/dev/null | tr -d ' ')
+case "$TTY" in '' | '?' | '??') ;; *) INPUT="{\"tty\":\"$TTY\",${INPUT#*\{}" ;; esac
 case "$INPUT" in
   *'"hook_event_name":"PermissionRequest"'* | *'"hook_event_name": "PermissionRequest"'*)
     REPLY=$(printf '%s' "$INPUT" | curl -sf -m "${DIAL_PROMPT_TIMEOUT_S:-290}" -H 'content-type: application/json' \

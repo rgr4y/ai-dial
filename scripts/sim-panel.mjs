@@ -22,12 +22,22 @@ async function bots() {
   return readdirSync(join(ROOT, 'art/grok')).filter((f) => f.endsWith('.svg')).map((f) => [f.slice(0, -4), 0xffffff, f.slice(0, -4)]);
 }
 
-// mode: work (a busy session shown as the bot) or idle (no sessions; the pinned roster is just this bot).
+// Three working sessions, two named alike (the second is a Codex one): swipe, dots, "auto-ai ·2".
+const SESSIONS = [{ id: 's1', name: 'auto-ai', tool: 'Edit' }, { id: 's2', name: 'auto-ai', tool: 'Bash', agent: 'codex' },
+                  { id: 's3', name: 'api', tool: '' }];
+
+// mode: work (a busy session shown as the bot), idle (no sessions; the pinned roster is just this bot), multi (the
+// three sessions above) or notice (multi, plus a finished reply from s2: the bell).
 function pin(mode, [shape, color, name]) {
-  const hb = mode === 'work'
+  const lines = [];
+  const hb = mode === 'multi' || mode === 'notice'
+    ? { total: 3, running: 3, waiting: 0, msg: 'auto-ai Edit', entries: [], work: SESSIONS, latest: 's1' }
+    : mode === 'work'
     ? { total: 1, running: 1, waiting: 0, msg: `${name} working`, entries: [], avatar: shape, avatar_color: color, avatar_name: name }
     : { total: 0, running: 0, waiting: 0, msg: '', entries: [] };
-  writeFileSync(PIN, JSON.stringify({ ...hb, bots: [[shape, color, name]] }) + '\n');
+  lines.push({ ...hb, bots: [[shape, color, name]] });
+  if (mode === 'notice') lines.push({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: 'auto-ai: All tests pass.' }], sid: 's2', busy: 2, agent: 'codex' });
+  writeFileSync(PIN, lines.map((l) => JSON.stringify(l)).join('\n') + '\n');
   console.log(`pin ${mode} ${name} (${shape})`);
 }
 
@@ -42,6 +52,7 @@ button.on{border-color:#d97757;background:#3a2a24}
 <h2>Bots</h2><button onclick="step(-1)">◀ Prev</button><button onclick="step(1)">Next bot ▶</button>
 <h2>Current Bot</h2><div id="bot"></div>
 <button id="work" onclick="set('work')">Working</button><button id="idle" onclick="set('idle')">Idle</button>
+<h2>Sessions</h2><button id="multi" onclick="set('multi')">3 sessions</button><button id="notice" onclick="set('notice')">+ reply</button>
 <h2>Sim</h2><button onclick="release()">Release to bridge</button>
 <script>
 let bots = [], i = 0, mode = null;
@@ -49,7 +60,7 @@ const hex = (c) => '#' + c.toString(16).padStart(6, '0');
 function show() {
   const [shape, c, name] = bots[i];
   document.getElementById('bot').innerHTML = '<span id="sw" style="background:' + hex(c) + '"></span>' + name + ' <small style="color:#888">' + shape + ' · ' + (i + 1) + '/' + bots.length + '</small>';
-  for (const m of ['work', 'idle']) document.getElementById(m).className = m === mode ? 'on' : '';
+  for (const m of ['work', 'idle', 'multi', 'notice']) document.getElementById(m).className = m === mode ? 'on' : '';
 }
 async function send() { if (mode) await fetch('/pin', { method: 'POST', body: JSON.stringify({ mode, bot: bots[i] }) }); show(); }
 function step(d) { i = (i + d + bots.length) % bots.length; mode ??= 'idle'; send(); }  // Next shows it: idle unless working
@@ -75,7 +86,7 @@ createServer(async (req, res) => {
     let p = null;
     try {
       const hb = JSON.parse(readFileSync(PIN, 'utf8').split('\n')[0]);
-      p = { mode: hb.running ? 'work' : 'idle', bot: hb.bots?.[0] };
+      p = { mode: hb.work ? 'multi' : hb.running ? 'work' : 'idle', bot: hb.bots?.[0] };  // a notice pin reads back as multi
     } catch {}
     return res.end(JSON.stringify(p?.bot ? p : null));
   }

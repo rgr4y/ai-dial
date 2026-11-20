@@ -27,7 +27,7 @@ const hhmm = (ms) => new Date(ms).toTimeString().slice(0, 5);
 
 export class Board {
   constructor() {
-    this.sessions = new Map(); // session_id -> { project, status, at, tool, hint, prompt }
+    this.sessions = new Map(); // session_id -> { id, born, project, status, at, tool, hint, prompt, tty }
     this.entries = [];         // newest first, "HH:MM project: what"
     this.seq = 0;
   }
@@ -35,12 +35,13 @@ export class Board {
   _session(ev, now) {
     let s = this.sessions.get(ev.session_id);
     if (!s) {
-      s = { project: basename(ev.cwd || '') || ev.session_id.slice(0, 8), status: 'idle', at: now, tool: '', hint: '',
-            prompt: null, pending: null };
+      s = { id: ev.session_id, born: now, project: basename(ev.cwd || '') || ev.session_id.slice(0, 8), status: 'idle',
+            at: now, tool: '', hint: '', prompt: null, pending: null };
       this.sessions.set(ev.session_id, s);
     }
     if (ev.session_name) s.name = ev.session_name;  // Claude Code /rename title (dial-bridge.mjs): beats the dirname
     if (ev.cwd || s.name) s.project = s.name || basename(ev.cwd);
+    if (typeof ev.tty === 'string' && /^[\w./-]{1,32}$/.test(ev.tty)) s.tty = ev.tty;  // hook.sh: the session's terminal
     if (ev.agent) s.agent = ev.agent;  // hook.sh <agent>: not Claude Code (codex)
     if (ev.avatar) { s.avatar = ev.avatar; s.avatar_color = ev.avatar_color ?? 0xFFFFFF; }  // Grok Bot: its bot's look
     s.at = now;
@@ -53,11 +54,17 @@ export class Board {
     this.entries.length = Math.min(this.entries.length, 5);
   }
 
-  // Apply one hook event. Returns { cleared, turn, speaker } where cleared is the prompt id this event made moot
-  // (answered in the terminal), turn is assistant text to show on the done card, and speaker says who wrote it when
-  // that isn't Claude Code: { agent } (Codex, Copilot) or { avatar, avatar_color, avatar_name } (a Grok bot).
+  // The terminal device (`ttys003`) a session's hooks ran in, if hook.sh saw one. Voice types into it.
+  tty(id) {
+    return this.sessions.get(id)?.tty;
+  }
+
+  // Apply one hook event. Returns { cleared, turn, speaker, sid, busy } where cleared is the prompt id this event made
+  // moot (answered in the terminal), turn is assistant text to show on the done card, speaker says who wrote it when
+  // that isn't Claude Code: { agent } (Codex, Copilot) or { avatar, avatar_color, avatar_name } (a Grok bot), sid is
+  // the session it came from and busy how many other sessions are still working (the dial shows that reply as a notice).
   event(ev, now) {
-    const out = { cleared: null, turn: null, speaker: null };
+    const out = { cleared: null, turn: null, speaker: null, sid: null, busy: 0 };
     if (!ev || !ev.session_id || !ev.hook_event_name) return out;
     const name = ev.hook_event_name;
     if (name === 'SessionEnd') {
@@ -95,7 +102,11 @@ export class Board {
       s.tool = '';
       this._entry(now, s.project, 'done');
       const text = plainText(ev.last_assistant_message || '');
-      if (text) out.turn = `${s.project}: ${text}`;
+      if (text) {
+        out.turn = `${s.project}: ${text}`;
+        out.sid = s.id;
+        out.busy = [...this.sessions.values()].filter((o) => o !== s && o.status === 'working').length;
+      }
       if (text && s.avatar) out.speaker = { avatar: s.avatar, avatar_color: s.avatar_color, avatar_name: s.project };
       else if (text && s.agent) out.speaker = { agent: s.agent };
     } else if (name === 'SessionStart' && ev.source !== 'new') {
@@ -147,8 +158,14 @@ export class Board {
     const waiting = all.filter((s) => s.prompt).sort((a, b) => a.prompt.at - b.prompt.at);
     // Read-only waits (no allow/deny): count and first project, so the dial can show "waiting on the Mac".
     const pend = all.filter((s) => s.pending).sort((a, b) => a.pending.at - b.pending.at);
+    // Every working session, in the order they started: stable while the dial swipes between them. `latest` is the one
+    // that did something last (the dial's fallback when the focused one ends); the flat fields below describe it.
+    const work = all.filter((s) => s.status === 'working').sort((a, b) => a.born - b.born).map((s) => ({
+      id: s.id, name: s.project, tool: s.tool, ...(s.agent && { agent: s.agent }),
+      ...(s.avatar && { avatar: s.avatar, avatar_color: s.avatar_color }) }));
     const hb = { total: all.length, running: working.length, waiting: waiting.length, msg: '',
-                 entries: this.entries, ...(pend.length && { watching: pend.length }) };
+                 entries: this.entries, ...(pend.length && { watching: pend.length }),
+                 ...(work.length && { work, latest: working[0].id }) };
     if (waiting.length) {
       const p = waiting[0].prompt;
       hb.msg = `approve: ${p.tool}`;

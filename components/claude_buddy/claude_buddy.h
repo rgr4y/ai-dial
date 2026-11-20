@@ -18,6 +18,18 @@ struct Bot {
   std::string name;
 };
 
+// A working session (heartbeat `work`): id, display name, current tool, and its look: agent ("codex") or a Grok bot.
+struct Work {
+  std::string id, name, tool, agent;
+  Bot avatar;  // shape empty unless a Grok bot session
+};
+
+// A reply from a session while other sessions were still working (evt:turn with `busy`): the dial shows it as a notice.
+struct Notice {
+  std::string sid, text, agent;
+  Bot bot;
+};
+
 // One provider on the usage screen: rate windows of (label, percent used, time to reset).
 struct UsageCard {
   struct Win {
@@ -42,6 +54,8 @@ struct Snapshot {
   std::string agent;      // busy session's agent when not Claude Code ("codex"); empty otherwise
   Bot avatar;             // busy Grok Bot session's bot; shape empty otherwise
   std::vector<Bot> bots;  // every known Grok bot: the idle face cycles them
+  std::vector<Work> work;     // every working session, in start order (empty from an older bridge)
+  std::string latest;         // id of the working session active last: focus falls back to it
   uint32_t at_ms = 0;                               // millis() of the last heartbeat; 0 = never
 };
 
@@ -65,6 +79,7 @@ class ClaudeBuddy : public Component {
   // Who wrote last_text: a Grok bot (shape set), another agent ("codex", "copilot"), or Claude Code (both empty).
   const Bot &last_bot() const { return this->last_bot_; }
   const std::string &last_agent() const { return this->last_agent_; }
+  std::vector<Notice> &notices() { return this->notices_; }  // oldest first; the UI pops them when read
   void approve() { this->decide_("once"); }
   void deny() { this->decide_("deny"); }
 
@@ -80,6 +95,7 @@ class ClaudeBuddy : public Component {
   uint32_t last_text_ms_{0};
   Bot last_bot_;
   std::string last_agent_;
+  std::vector<Notice> notices_;
   bool was_live_{false};
 };
 

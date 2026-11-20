@@ -16,6 +16,7 @@
 #include "character.h"
 #include "power.h"
 #include "scene.h"
+#include "sessions.h"
 #include "esphome/core/defines.h"
 #ifdef USE_WIFI
 #include "esphome/components/wifi/wifi_component.h"
@@ -50,7 +51,6 @@ inline uint32_t provider_ink(const std::string &name, uint32_t other = TEXT) {
 // ---- timings ----
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
 static constexpr uint32_t BOOT_AWAKE_MS = 60000; // never idle-sleep in the first minute after boot
-static constexpr uint32_t ENTRIES_MS = 15000;   // the entries view drops back to the face
 static constexpr uint32_t OTA_FAIL_MS = 5000;  // failed-update page stays this long
 static constexpr int OTA_BAR_W = 300, OTA_BAR_MIN = 14;
 static constexpr uint32_t USAGE_SCREEN_MS = 30000;  // the usage screen (BOOT) drops back to the face
@@ -70,8 +70,8 @@ static constexpr uint32_t CARD_MANUAL_MS = 5000;
 
 struct Fonts { const lv_font_t *f20, *f25, *f26m, *f30, *f48b, *f96b; };
 
-enum class View : uint8_t { BRAND, FACE, PERMISSION, ENTRIES, USAGE, BATTERY, OTA };
-static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "entries", "usage", "battery", "ota"};
+enum class View : uint8_t { BRAND, FACE, PERMISSION, USAGE, BATTERY, OTA };
+static const char *const VIEW_NAMES[] = {"brand", "face", "permission", "usage", "battery", "ota"};
 
 struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: power.h
   Fonts f{};
@@ -86,7 +86,14 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   lv_obj_t *word = nullptr, *sub = nullptr;                                  // brand (bridge offline)
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
   lv_obj_t *btn_deny = nullptr, *btn_allow = nullptr;
-  lv_obj_t *list = nullptr, *list_text = nullptr;
+  // Page dots (more than one working session): one per session, the focused one lit. Only DOTS_MAX are drawn.
+  static constexpr int DOTS_MAX = 8, DOT_PITCH = 18, DOT_D = 12;
+  lv_obj_t *dots = nullptr, *dot[DOTS_MAX] = {};
+  std::string dots_txt;  // "2/3": what the dots show, also the mirror's `dots`
+  std::string focus_id;  // the working session the face shows (sticky: only a swipe, the bell or its end moves it)
+  bool viewing = false;  // a notice's reply is on the card (opened with the bell)
+  esphome::claude_buddy::Notice notice;  // that reply
+  size_t notice_n = 0;   // notices seen so far: a new one wakes the dial
   lv_obj_t *usage = nullptr;  // usage screen: rebuilt from the snapshot's cards (build_usage)
   static constexpr int BURST_N = 18;
   lv_obj_t *burst[BURST_N] = {};     // bridge connected: green sparks fly out from the centre
@@ -95,8 +102,6 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
 
   ClaudeBuddy *buddy = nullptr;
   View view = View::BRAND;
-  bool entries_open = false;
-  uint32_t entries_at = 0;
   bool usage_open = false;
   uint32_t usage_at = 0;
   bool loading = false;  // boot pack load in progress: LVGL is blocked, so no shimmer (it would freeze mid-sweep)
@@ -378,7 +383,7 @@ inline void publish_state() {
     p["hint"] = lv_label_get_text(u.perm_hint);
     p["count"] = lv_label_get_text(u.perm_count);
   }
-  if (vis(u.list)) d["list"] = lv_label_get_text(u.list_text);
+  if (vis(u.dots)) d["dots"] = u.dots_txt;
   if (vis(u.usage)) {
     JsonArray cards = d["usage"].to<JsonArray>();
     for (const auto &c : u.buddy->snap().usages) {
@@ -406,14 +411,14 @@ inline void publish_state() {
 inline void on_root(lv_event_t *e) {
   Ui &u = ui();
   lv_event_code_t code = lv_event_get_code(e);
-  bool closable = u.view == View::ENTRIES || u.view == View::USAGE || u.view == View::BATTERY;
+  bool closable = u.view == View::USAGE || u.view == View::BATTERY;
   const char *t = nullptr;
-  if (code == LV_EVENT_LONG_PRESSED) {
-    t = "hold";  // face hold (650 ms, fires while still held): recent entries + stats
-  } else if (code == LV_EVENT_GESTURE) {
-    bool right = lv_indev_get_gesture_dir(lv_indev_active()) == LV_DIR_RIGHT;
+  if (code == LV_EVENT_GESTURE) {
+    lv_dir_t dir = lv_indev_get_gesture_dir(lv_indev_active());
+    bool right = dir == LV_DIR_RIGHT;
     if (right && u.view == View::PERMISSION && u.buddy->has_prompt()) t = "later";  // swipe right = back = "later" (spec §3)
     else if (closable) t = "back";
+    else if (u.view == View::FACE && (dir == LV_DIR_LEFT || right)) t = right ? "prev" : "next";  // between sessions
   } else if (code == LV_EVENT_SHORT_CLICKED && closable) {
     t = "back";  // "Tap to close"
   }
@@ -465,7 +470,6 @@ inline void boot(uint32_t now) {
     u.battery_open = true;
     u.battery_at = now;
   } else {
-    u.entries_open = false;
     u.usage_open = false;
     u.battery_open = false;
   }
@@ -473,7 +477,7 @@ inline void boot(uint32_t now) {
 }
 
 // Remote tap (api action buddy_tap): the same effect as touching the glass.
-// targets: allow, deny, later, card, bell, hold, back, wake, screen, boot
+// targets: allow, deny, later, card, bell, next, prev, back, wake, screen, boot
 inline void tap(const std::string &t) {
   Ui &u = ui();
   uint32_t now = lv_tick_get();
@@ -490,15 +494,36 @@ inline void tap(const std::string &t) {
   } else if (t == "later" && u.view == View::PERMISSION && u.buddy->has_prompt()) {
     u.deferred_id = u.buddy->snap().prompt_id;
   } else if (t == "card" && u.view == View::FACE) {
-    u.recap_cleared = u.buddy->last_text_ms();
-    pick_hint();
+    if (u.viewing) {
+      u.viewing = false;  // a notice's reply: the face goes back to what it showed
+    } else {
+      u.recap_cleared = u.buddy->last_text_ms();
+      pick_hint();
+    }
   } else if (t == "bell") {
-    u.deferred_id.clear();
-  } else if (t == "hold" && u.view == View::FACE) {
-    u.entries_open = true;
-    u.entries_at = now;
+    // The bell pill (not the alert bubble) opens the oldest notice first: its session takes focus if it still works,
+    // and its reply shows on the card. With none queued it reopens the put-off prompt.
+    auto &n = u.buddy->notices();
+    if (n.empty() || lv_obj_is_hidden(u.bell)) {
+      u.deferred_id.clear();
+    } else {
+      u.notice = n.front();
+      n.erase(n.begin());
+      u.viewing = true;
+      u.notice_n = n.size();
+      for (const auto &w : u.buddy->snap().work)
+        if (w.id == u.notice.sid) u.focus_id = w.id;
+    }
+  } else if ((t == "next" || t == "prev") && u.view == View::FACE) {
+    // Swipe on the busy face: next / previous working session (start order, wrapping). Also closes a notice's card.
+    const auto &w = u.buddy->snap().work;
+    if (!w.empty() && (w.size() > 1 || u.viewing)) {
+      int i = sessions::focus_index(w, u.focus_id, u.buddy->snap().latest);
+      if (w.size() > 1) i = sessions::step(i, (int) w.size(), t == "next" ? 1 : -1);
+      u.focus_id = w[i].id;
+      u.viewing = false;
+    }
   } else if (t == "back") {
-    u.entries_open = false;
     u.usage_open = false;
     u.battery_open = false;
   }
@@ -514,12 +539,11 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_style_bg_color(root, lv_color_hex(0x000000), 0);
   lv_obj_set_scrollable(root, false);
   lv_obj_set_clickable(root, true);
-  lv_obj_add_event_cb(root, on_root, LV_EVENT_LONG_PRESSED, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_GESTURE, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_SHORT_CLICKED, nullptr);
   lv_obj_add_event_cb(root, on_root, LV_EVENT_PRESSED, nullptr);  // any touch counts as activity
   if (lv_indev_t *in = lv_indev_get_next(nullptr)) {
-    lv_indev_set_long_press_time(in, 650);  // spec §3: hold 650 ms
+    lv_indev_set_long_press_time(in, 650);  // spec §3: hold 650 ms (nothing handles the hold yet: kept free for voice)
   }
 
   u.scene.create(root);
@@ -620,17 +644,20 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_event_cb(u.btn_deny, on_decide, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(u.btn_allow, on_decide, LV_EVENT_CLICKED, nullptr);
 
-  // Entries (face hold): recent transcript lines + sessions, in place of the Harness inbox.
-  u.list = lv_obj_create(root);
-  lv_obj_remove_style_all(u.list);
-  lv_obj_set_size(u.list, scene::W, scene::W);
-  lv_obj_set_event_bubble(u.list, true);
-  u.list_text = mk_label(u.list, u.f.f25, TEXT);
-  lv_obj_set_width(u.list_text, 340);
-  lv_obj_set_style_text_align(u.list_text, LV_TEXT_ALIGN_LEFT, 0);
-  lv_label_set_long_mode(u.list_text, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_align(u.list_text, LV_ALIGN_TOP_MID, 0, 96);
-  lv_obj_set_event_bubble(u.list_text, true);
+  // Page dots above the status line: DOTS_MAX small circles, placed and lit per update().
+  u.dots = lv_obj_create(root);
+  lv_obj_remove_style_all(u.dots);
+  lv_obj_set_size(u.dots, Ui::DOTS_MAX * Ui::DOT_PITCH, Ui::DOT_D);
+  lv_obj_set_clickable(u.dots, false);
+  lv_obj_set_hidden(u.dots, true);
+  for (int i = 0; i < Ui::DOTS_MAX; i++) {
+    lv_obj_t *d = u.dot[i] = lv_obj_create(u.dots);
+    lv_obj_remove_style_all(d);
+    lv_obj_set_size(d, Ui::DOT_D, Ui::DOT_D);
+    lv_obj_set_style_radius(d, LV_RADIUS_CIRCLE, 0);
+    lv_obj_set_style_bg_opa(d, LV_OPA_COVER, 0);
+    lv_obj_set_clickable(d, false);
+  }
 
   // Usage screen (BOOT): children made by build_usage().
   u.usage = lv_obj_create(root);
@@ -861,14 +888,20 @@ inline void update(uint32_t now) {
     u.work_start = now;
     u.build = rand() & 1;
     u.recap_cleared = b->last_text_ms();
-    u.entries_open = false;
+    u.focus_id.clear();  // a fresh run starts on the most recently active session
     activity(now);
   } else if (!running && u.was_running) {
     activity(now);  // done: wake to show the recap
   }
   u.was_running = running;
+  // Focus is a session id: it stays put while that session works, and falls back to the most recently active when it ends.
+  int fi = running ? sessions::focus_index(s.work, u.focus_id, s.latest) : -1;
+  if (fi >= 0) u.focus_id = s.work[fi].id;
+  const esphome::claude_buddy::Work *fw = fi >= 0 ? &s.work[fi] : nullptr;
+  auto &notices = b->notices();
+  if (notices.size() > u.notice_n) activity(now);  // a reply from another session wakes the dial
+  u.notice_n = notices.size();
   if (u.deferred_id != s.prompt_id && !s.prompt_id.empty()) u.deferred_id.clear();
-  if (u.entries_open && now - u.entries_at > ENTRIES_MS) u.entries_open = false;
   if (u.usage_open && now - u.usage_at > USAGE_SCREEN_MS) u.usage_open = false;
   if (u.battery_open && now - u.battery_at > USAGE_SCREEN_MS) u.battery_open = false;
   if (u.ota_on && u.ota_fail_at && now - u.ota_fail_at > OTA_FAIL_MS) u.ota_on = false, u.ota_fail_at = 0;
@@ -878,7 +911,6 @@ inline void update(uint32_t now) {
            : b->has_prompt() && u.deferred_id.empty()   ? View::PERMISSION
            : u.usage_open                               ? View::USAGE
            : u.battery_open                             ? View::BATTERY
-           : u.entries_open                             ? View::ENTRIES
                                                         : View::FACE;
   if (v == View::PERMISSION && u.view != View::PERMISSION) activity(now);  // a new question wakes the dial
   if (v == View::FACE && u.view != View::FACE) pick_hint();
@@ -921,7 +953,7 @@ inline void update(uint32_t now) {
     Ui &u;
     lv_obj_t *o[11];
     bool want[11] = {};
-    explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.list, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
+    explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.dots, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
     void on(lv_obj_t *x) {
       for (int i = 0; i < 11; i++)
         if (o[i] == x) want[i] = true;
@@ -1010,21 +1042,6 @@ inline void update(uint32_t now) {
     return;
   }
 
-  if (v == View::ENTRIES) {
-    u.scene.stop();
-    u.alert.stop();
-    vis.on(u.list);
-    std::string t;
-    for (const auto &e : s.entries) t += cut(one_line(e), 28) + "\n";
-    if (s.entries.empty()) t = "Nothing here yet.\n";
-    set_text(u.list_text, t.c_str());
-    char buf[64];
-    snprintf(buf, sizeof(buf), "%u session%s", (unsigned) s.total, s.total == 1 ? "" : "s");
-    arc_text(u.name_arc, "Recent", NAME);
-    arc_text(u.status_arc, s.usage.empty() ? buf : s.usage.c_str(), provider_ink(s.usage, RELAX_LINE));
-    return;
-  }
-
   // ---- FACE (spec §2.9) ----
   const esphome::claude_buddy::Bot *shown = nullptr;  // a Grok bot on the face instead of Clawd: its name tops the face
   bool recap = !running && !b->last_text().empty() && b->last_text_ms() > u.recap_cleared;
@@ -1036,6 +1053,9 @@ inline void update(uint32_t now) {
     else if (b->last_agent() == "copilot") name = "Copilot";
   };
   bool waiting = s.waiting > 0;  // only reachable here once the prompt was put off
+  bool bell_ok = false;          // the bell pill may show (not over a card)
+  std::string title;             // the focused session's name, when a working session is on the face
+  uint32_t title_rgb = NAME;
   // Finger still on the reply (scrolled within CARD_MANUAL_MS): keep it up through a new turn; tick() hands back.
   bool reading = u.card_manual && (now - u.card_manual_at < CARD_MANUAL_MS ||
                                    lv_indev_get_state(lv_indev_get_next(nullptr)) == LV_INDEV_STATE_PRESSED);
@@ -1052,16 +1072,34 @@ inline void update(uint32_t now) {
     vis.on(u.card);
     vis.on(u.dismiss);
     reply_by();
+  } else if (u.viewing) {
+    // A notice opened from the bell: that reply on the card, until Dismiss.
+    u.scene.stop();
+    u.alert.stop();
+    vis.on(u.card);
+    vis.on(u.dismiss);
+    if (!u.notice.bot.shape.empty()) shown = &u.notice.bot;
+    else if (u.notice.agent == "codex") name = "Codex";
+    else if (u.notice.agent == "copilot") name = "Copilot";
+    show_card(cut(one_line(u.notice.text), RECAP_MAX), now);
+    arc_text(u.status_arc, "", RELAX_LINE);
   } else if (running) {
-    // A busy Grok Bot session shows its own bot (bridge heartbeat `avatar`), Codex and Copilot their pets (`agent`),
-    // else Clawd cooks or builds.
-    const scene::Scene *sc = s.avatar.shape.empty() ? nullptr : character::find(("grok_" + s.avatar.shape).c_str());
-    const char *agent = s.agent == "codex" ? "Codex" : s.agent == "copilot" ? "Copilot" : nullptr;
-    const scene::Scene *cx = agent ? character::find((s.agent + "_work").c_str()) : nullptr;
+    bell_ok = true;
+    // The focused session's look (heartbeat `work`; an older bridge sends only the flat fields for the latest one): a
+    // Grok Bot session shows its own bot (`avatar`), Codex and Copilot their pets (`agent`), else Clawd cooks or builds.
+    const auto &av = fw ? fw->avatar : s.avatar;
+    const std::string &ag = fw ? fw->agent : s.agent;
+    if (fw) {
+      title = sessions::label(s.work, fi);
+      title_rgb = !av.shape.empty() ? av.rgb : provider_ink(ag.empty() ? "claude" : ag);
+    }
+    const scene::Scene *sc = av.shape.empty() ? nullptr : character::find(("grok_" + av.shape).c_str());
+    const char *agent = ag == "codex" ? "Codex" : ag == "copilot" ? "Copilot" : nullptr;
+    const scene::Scene *cx = agent ? character::find((ag + "_work").c_str()) : nullptr;
     if (sc) {
       u.scene.play(sc, now, 4);
-      u.scene.set_tint(s.avatar.rgb);
-      shown = &s.avatar;
+      u.scene.set_tint(av.rgb);
+      if (!fw) shown = &s.avatar;
     } else if (cx) {
       u.scene.play(sc = cx, now, 4);
       name = agent;
@@ -1080,13 +1118,32 @@ inline void update(uint32_t now) {
     } else {
       u.alert.stop();
     }
-    // Live line "<verb>… m:ss" in voice green (focus.c:764-791). Verb: the heartbeat's msg, else a gerund.
+    // Live line "<verb>… m:ss" in voice green (focus.c:764-791). Verb: the focused session's tool (the heartbeat's msg
+    // when there is no `work`), else a gerund.
     char el[16], line[64];
     fmt_elapsed(el, sizeof(el), now - u.work_start);
-    std::string verb = s.msg.empty() ? GERUNDS[(now - u.work_start) / GERUND_MS % (sizeof(GERUNDS) / sizeof(GERUNDS[0]))]
-                                     : cut(one_line(s.msg), 18);
+    const std::string &said = fw ? fw->tool : s.msg;
+    std::string verb = said.empty() ? GERUNDS[(now - u.work_start) / GERUND_MS % (sizeof(GERUNDS) / sizeof(GERUNDS[0]))]
+                                    : cut(one_line(said), 18);
     snprintf(line, sizeof(line), "%s\xE2\x80\xA6 %s", verb.c_str(), el);
     arc_text(u.status_arc, line, LIVE, true);
+    // Page dots when several sessions work. Above the bell pill when that is up, else just above the status line.
+    if (s.work.size() > 1) {
+      int n = std::min<int>((int) s.work.size(), Ui::DOTS_MAX), lit = std::min(fi, n - 1);
+      char key[16];
+      snprintf(key, sizeof(key), "%d/%d", lit + 1, (int) s.work.size());
+      bool bell = !notices.empty();
+      lv_obj_align(u.dots, LV_ALIGN_TOP_MID, 0, bell ? 336 : 370);
+      if (u.dots_txt != key) {
+        u.dots_txt = key;
+        for (int i = 0; i < Ui::DOTS_MAX; i++) {
+          show(u.dot[i], i < n);
+          lv_obj_set_pos(u.dot[i], (Ui::DOTS_MAX - n) * Ui::DOT_PITCH / 2 + i * Ui::DOT_PITCH, 0);
+          lv_obj_set_style_bg_color(u.dot[i], lv_color_hex(i == lit ? 0xffffff : 0x4a4c56), 0);
+        }
+      }
+      vis.on(u.dots);
+    }
   } else if (recap) {
     u.scene.stop();
     u.alert.stop();
@@ -1125,9 +1182,11 @@ inline void update(uint32_t now) {
       u.scene.play(pets[p], now, 4);
       if (names[p]) name = names[p];
     }
-    arc_text(u.status_arc, waiting ? "" : u.hint, RELAX_LINE);  // hint left out while the bell shows
+    arc_text(u.status_arc, waiting || !notices.empty() ? "" : u.hint, RELAX_LINE);  // hint left out while the bell shows
+    bell_ok = true;
   }
-  if (shown && !shown->name.empty()) arc_text(u.name_arc, shown->name.c_str(), shown->rgb);
+  if (!title.empty()) arc_text(u.name_arc, title.c_str(), title_rgb);
+  else if (shown && !shown->name.empty()) arc_text(u.name_arc, shown->name.c_str(), shown->rgb);
   else arc_text(u.name_arc, name, provider_ink(name, NAME));
   // Plan usage: 3 s of every 15 s on the lower arc, over whatever the face shows there (Harness's display carries
   // "what your harness has spent today"; this is the plan's 5-hour / weekly use from the bridge).
@@ -1143,9 +1202,14 @@ inline void update(uint32_t now) {
       vis.on(u.alarm);
     }
   }
-  if (waiting && !running) {
-    char n[16];
-    snprintf(n, sizeof(n), "%u waiting", (unsigned) s.waiting);  // ponytail: no bell glyph (Harness uses FontAwesome)
+  // Bell pill: put-off prompts when nothing is running (the alert bubble covers them otherwise) and replies from other
+  // sessions. Tapping it opens the oldest reply (tap("bell")).
+  unsigned held = waiting && !running ? s.waiting : 0, news = (unsigned) notices.size();
+  if (bell_ok && (held || news)) {
+    char n[32];  // ponytail: no bell glyph (Harness uses FontAwesome)
+    if (held && news) snprintf(n, sizeof(n), "%u waiting \xC2\xB7 %u new", held, news);
+    else if (held) snprintf(n, sizeof(n), "%u waiting", held);
+    else snprintf(n, sizeof(n), "%u new", news);
     set_text(u.bell_text, n);
     vis.on(u.bell);
   }
@@ -1253,7 +1317,7 @@ inline void tick(uint32_t now) {
     update(now);
   }
   static uint32_t last_state = 0;
-  if (now - last_state >= 1000) {  // stopwatch seconds, entries timeout, send scene end
+  if (now - last_state >= 1000) {  // stopwatch seconds, usage timeouts, send scene end
     last_state = now;
     update(now);
   }
