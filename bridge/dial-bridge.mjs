@@ -38,6 +38,7 @@ import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
 import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
 import { route, sessionList } from './router.mjs';
+import { createVoiceFlow } from './voiceflow.mjs';
 import { cleanText, openStt, registerVoiceMessages, stashTts, synthesize, tmuxHasSession, ttsFiles, typeIntoTmuxSession, typeIntoTty, wavMs } from './voice.mjs';
 
 const { Client, ServiceArgType } = esphome;
@@ -175,165 +176,33 @@ function sendLine(obj, only) {
 // confirm, send, note) and sid (the session it talks to, fixed when the hold began). Text only goes out on "send", and
 // only to a session whose terminal we know: no tty, no typing.
 const say = (dial, o) => sendLine({ evt: 'voice', ...o }, dial);
-function voiceStart(dial) {
-  dial.stt?.abort();
-  dial.pending = null;
-  // A new hold drops a question; the re-listen it armed is not one. The arm is spent by that one start, and lapses if
-  // the dial never started it (mic failed), so a later hold is routed normally, not taken as a session name.
-  if (dial.ask?.armed && Date.now() - dial.ask.armedAt < ASK_ARM_MS) dial.ask.armed = false;
-  else dial.ask = null;
-  const res = new pb.VoiceAssistantResponse();  // port 0: audio comes over the API connection
-  res.setPort(0);
-  res.setError(false);
-  try {
+const PLAYING = pb.MediaPlayerState.MEDIA_PLAYER_STATE_PLAYING;  // the API reports an announcement as PLAYING, never ANNOUNCING (esphome api_connection.cpp try_send_media_player_state)
+// The flow itself (hold -> STT -> route -> confirm -> send, the session question, the speak queue) is voiceflow.mjs;
+// this wires in the board, router, iTerm, Wyoming and the protobuf messages. Speaking: text -> claude-speak rules ->
+// Wyoming TTS (WAV) -> served at tts/<id>.wav on the assets port -> media_player announcement on the dial.
+const { voiceStart, voiceStop, speak, onUiForVoice } = createVoiceFlow({
+  dials, board, say, log, PLAYING, sessionList, route, routerEnv: ROUTER_ENV, routerTimeoutMs: ROUTER_TIMEOUT_MS,
+  openStt: (onPartial) => openStt({ host: STT_HOST, port: STT_PORT, onPartial }),
+  cleanText, answerPrompt, typeIntoTty, typeIntoTmuxSession, tmuxHasSession, assistant: ASSISTANT,
+  synthesize: (text) => synthesize(text, { host: TTS_HOST, port: TTS_PORT }), stashTts, wavMs,
+  ttsUrl: (addr, id) => `http://${addr}:${ASSETS_PORT}/tts/${id}.wav`,
+  localAddress: (dial) => dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, ''),
+  startResponse: (dial) => {
+    const res = new pb.VoiceAssistantResponse();  // port 0: audio comes over the API connection
+    res.setPort(0);
+    res.setError(false);
     dial.client.connection.sendMessage(res);
-  } catch (e) {
-    return log(`voice start on ${dial.host} failed:`, e.message);
-  }
-  log(`voice: listening (${dial.host})`);
-  dial.stt = openStt({ host: STT_HOST, port: STT_PORT, onPartial: (text) => say(dial, { text }) });
-}
-function voiceStop(dial) {
-  const stt = dial.stt;
-  dial.stt = null;
-  if (!stt) return;
-  stt.finish().then(async (raw) => {
-    const text = cleanText(raw), focusedId = dial.ui?.sid;
-    const ask = dial.ask;
-    dial.ask = null;  // any outcome ends the question
-    log(`voice: heard ${text ? text.length + ' chars' : 'nothing'}${ask ? ' (answer to ask)' : ''}`);
-    if (!text) return say(dial, { error: "Didn't catch that" });
-    const sessions = sessionList(board);
-    if (ask) {  // the answer to "Which session?": a name, then the original words go there
-      const key = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');  // router.mjs find(): exact, ignoring case and punctuation
-      const hit = sessions.filter((s) => key(s.name) === key(text));
-      if (hit.length !== 1) {
-        log(`voice: no session called "${text}" (${hit.length} matches), dropped`);
-        return say(dial, { error: `No session called ${text}` });
-      }
-      return queueSend(dial, hit[0].id, ask.text, sessions, focusedId);
-    }
-    const r = await route({ text, sessions, focusedId, env: ROUTER_ENV, timeoutMs: ROUTER_TIMEOUT_MS });
-    log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
-    const name = (sid) => sessions.find((s) => s.id === sid)?.name || sid;
-    if (r.action === 'send') {
-      if (!r.sid) return askSession(dial, r.text);  // nothing on the face, none named
-      return queueSend(dial, r.sid, r.text, sessions, focusedId);
-    }
-    if (r.action === 'assistant') {
-      if (!(await tmuxHasSession(ASSISTANT))) {
-        log(`voice: assistant tmux session "${ASSISTANT}" not running, dropped`);
-        return say(dial, { error: 'Assistant offline' });  // never re-route to another session
-      }
-      dial.pending = { run: () => typeIntoTmuxSession(ASSISTANT, r.text).then(
-        (ok) => log(ok ? `voice: typed ${r.text.length} chars into assistant` : 'voice: assistant went away, dropped'),
-        (e) => log('voice: assistant tmux failed:', e.message)) };
-      return say(dial, { final: `Assistant: ${r.text}` });
-    }
-    if (r.action === 'answer') {
-      const p = board.sessions.get(r.sid)?.prompt;
-      dial.pending = { run: () => answerPrompt(r.sid, p?.id, r.decision) };
-      return say(dial, { final: `${r.decision === 'allow' ? 'Allow' : 'Deny'} ${name(r.sid)}: ${p?.tool || 'prompt'}` });
-    }
-    dial.pending = { run: () => speak(dial, r.text).catch((e) => log('voice: speak failed:', e.message)) };  // the card shows the reply; "send" also says it
-    say(dial, { final: r.text });
-  }).catch((e) => {
-    log('voice: failed:', e.message);
-    say(dial, { error: 'Speech service offline' });
-  });
-}
-// Type text into a session once the confirm card runs out.
-function queueSend(dial, sid, text, sessions, focusedId) {
-  if (!board.tty(sid)) {
-    log(`voice: no terminal known for session ${sid}, dropped`);
-    return say(dial, { error: 'No terminal for that session' });
-  }
-  dial.pending = { run: () => typeSession(sid, text) };
-  log(`voice: confirm -> ${sessions.find((s) => s.id === sid)?.name || sid} (${text.length} chars)`);
-  say(dial, { final: sid === focusedId ? text : `${sessions.find((s) => s.id === sid)?.name || sid}: ${text}` });
-}
-// No session to send to: say "Which session?", and only once it has finished playing (or failed) tell the dial to listen
-// again, so the mic does not hear the question. dial.ask holds the original text until the answer, a new hold, or an
-// empty / unmatched answer; `armed` marks the re-listen's own voiceStart as not a new hold.
-const ASK = 'Which session?', ASK_ARM_MS = 3000;  // the dial starts the re-listen well inside this
-function askSession(dial, text) {
-  const ask = dial.ask = { text, armed: false };
-  speak(dial, ASK).catch((e) => log('voice: ask speak failed:', e.message)).then(() => {
-    if (dial.ask !== ask || !dial.ready) return;  // a new hold took over
-    ask.armed = true;
-    ask.armedAt = Date.now();
-    say(dial, { ask: ASK });
-  });
-}
-// ---- speaking on the dial ----
-// text -> claude-speak rules -> Wyoming TTS (WAV) -> served at tts/<id>.wav on the assets port -> media_player
-// announcement (media_url + announcement) on the dial; the amp is always on, the silence loop keeps the DAC fed.
-// Resolves true when the dial reported announcing and then left it (playback done: qr8 re-arms the mic on that), false
-// when there was nothing to say, no dial, or the dial never started / never finished (logged).
-// The API reports an announcement as PLAYING, never ANNOUNCING (esphome api_connection.cpp try_send_media_player_state).
-const PLAYING = pb.MediaPlayerState.MEDIA_PLAYER_STATE_PLAYING;
-function waitPlayed(dial, ms) {
-  return new Promise((res) => {
-    let started = false;
-    const end = (ok) => { clearTimeout(startT); clearTimeout(endT); dial.onPlayer = null; res(ok); };
-    const startT = setTimeout(() => { if (!started) { log(`speak: ${dial.host} never started announcing`); end(false); } }, 5000);
-    const endT = setTimeout(() => { log(`speak: ${dial.host} announcement did not finish`); end(false); }, ms + 15000);
-    dial.onPlayer = (st) => {
-      if (st === null) end(false);  // disconnected
-      else if (st === PLAYING) started = true;
-      else if (started) end(true);
-    };
-  });
-}
-// Until the player leaves PLAYING (an earcon still going), or ms. Resolves at once if it isn't playing.
-function waitIdle(dial, ms) {
-  if (dial.playerState !== PLAYING) return Promise.resolve();
-  return new Promise((res) => {
-    const end = () => { clearTimeout(t); dial.onPlayer = null; res(); };
-    const t = setTimeout(end, ms);
-    dial.onPlayer = (st) => { if (st !== PLAYING) end(); };
-  });
-}
-// One speak at a time per dial: dial.onPlayer has one slot, and a second announcement's state changes would otherwise
-// end the first one's wait early or leave it to time out.
-function speak(dial, text) {
-  dial ??= dials.find((d) => d.ready && d.playerKey != null);
-  if (!dial) return log('speak: no dial with a media player'), Promise.resolve(false);
-  const run = (dial.speaking ?? Promise.resolve()).then(() => speakNow(dial, text));
-  dial.speaking = run.catch(() => {});
-  return run;
-}
-async function speakNow(dial, text) {
-  const addr = dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
-  if (!dial?.ready || dial.playerKey == null || !addr) return log('speak: no dial with a media player'), false;
-  const wav = await synthesize(text, { host: TTS_HOST, port: TTS_PORT });  // no voice: the server's default
-  if (!wav) return false;
-  // An earcon (the end sound on release) may still be playing: its PLAYING -> IDLE must not count as this one's.
-  await waitIdle(dial, 3000);
-  const url = `http://${addr}:${ASSETS_PORT}/tts/${stashTts(wav)}.wav`;
-  const played = waitPlayed(dial, wavMs(wav));
-  const m = new pb.MediaPlayerCommandRequest();  // the library's MediaPlayer entity has no announcement flag; the message does
-  m.setKey(dial.playerKey);
-  m.setHasMediaUrl(true);
-  m.setMediaUrl(url);
-  m.setHasAnnouncement(true);
-  m.setAnnouncement(true);
-  try {
+  },
+  announce: (dial, url) => {
+    const m = new pb.MediaPlayerCommandRequest();  // the library's MediaPlayer entity has no announcement flag; the message does
+    m.setKey(dial.playerKey);
+    m.setHasMediaUrl(true);
+    m.setMediaUrl(url);
+    m.setHasAnnouncement(true);
+    m.setAnnouncement(true);
     dial.client.connection.sendCommandMessage(m);
-  } catch (e) {
-    dial.onPlayer?.(null);
-    throw e;
-  }
-  log(`speak: ${wavMs(wav)} ms -> ${dial.host} ${url}`);
-  return played;
-}
-function typeSession(sid, text) {
-  const tty = board.tty(sid);
-  if (!tty) return log(`voice: no terminal known for session ${sid}, dropped`);
-  typeIntoTty(tty, text).then(
-    (ok) => log(ok ? `voice: typed ${text.length} chars into ${tty}` : `voice: no iTerm session on ${tty}, dropped`),
-    (e) => log('voice: osascript failed:', e.message));
-}
+  },
+});
 // Only if that very prompt is still open (answered in the terminal during the 2 s confirm = nothing to do).
 function answerPrompt(sid, promptId, decision) {
   const w = promptId && board.sessions.get(sid)?.prompt?.id === promptId && waiters.get(promptId);
@@ -341,18 +210,6 @@ function answerPrompt(sid, promptId, decision) {
   log(`voice: ${decision} prompt ${promptId}`);
   w(decision);
 }
-// Dial state: "send" runs the pending action; leaving wait / confirm any other way (tap to cancel, timeout) drops it.
-// A "send" with nothing pending (the simulator's fake words) is ignored.
-function onUiForVoice(dial) {
-  const v = dial.ui?.voice;
-  if (v !== dial.lastVoice) log(`voice: dial ${dial.host} ${dial.lastVoice ?? '-'} -> ${v ?? '-'}${dial.pending ? ' (pending)' : ''}`);
-  dial.lastVoice = v;
-  if (v === 'wait' || v === 'confirm') return;
-  const p = dial.pending;
-  dial.pending = null;
-  if (v === 'send') p?.run();
-}
-
 // ---- plan usage ----
 // Primary: CodexBar's HTTP server (GET /usage, loopback needs no token): one payload per enabled provider.
 // Fallback: ~/.claude/refresh-usage.sh (Claude OAuth usage API, TTL 150 s) writes ~/.claude/stats-usage.json.

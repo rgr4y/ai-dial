@@ -7,6 +7,8 @@ prompts from it, over Wi-Fi. Protocol: [`../docs/DIAL-PROTOCOL.md`](../docs/DIAL
   ESPHome native API (`DIAL_HOST`, a comma list: the dial and the desktop sim; key `api_key` from
   `~/workspace/esphome/secrets.yaml`). Every dial gets the same heartbeats; the first to answer a prompt wins. It also
   serves character packs (`assets/`) read-only on `0.0.0.0:19877` for the dial's LittleFS sync.
+- `voiceflow.mjs`: the voice flow (hold, STT, route, confirm, send, the "Which session?" question, the speak queue) with
+  injected dependencies; tested by `npm test`.
 - `board.mjs`: session state turned into a heartbeat. Pure; tested by `npm test`.
 - `hook.sh`: the hook command. It is fail-open: with no daemon or no dial, Claude Code behaves as if it weren't
   installed.
