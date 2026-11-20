@@ -1045,10 +1045,10 @@ inline void update(uint32_t now) {
   if (entered && u.view == View::BRAND) burst();  // the bridge just connected
   u.view = v;
   if (v != View::BRAND) u.was_live = true;
+  bool usb = u.on_usb && u.on_usb();  // one PMU read each per update(): the face-side % and the battery page share them
+  int bat = u.battery ? u.battery() : -1;
   {  // face-side battery %: face only, always on battery, 60 s after plug-in / wake on USB
-    bool usb = u.on_usb && u.on_usb();
     u.power_source(usb, now);
-    int bat = u.battery ? u.battery() : -1;
     bool side = v == View::FACE && bat >= 0 && u.show_battery_side(usb, now);
     show(u.bat_arc, side && !(usb && bat > 80));  // charging above 80%: the bolt alone
     show(u.bat_bolt, side && usb);
@@ -1146,7 +1146,6 @@ inline void update(uint32_t now) {
 
   if (v == View::BATTERY) {
     vis.on(u.battery_page);
-    int bat = u.battery ? u.battery() : -1;
     uint32_t ink = bat >= 0 ? power::battery_ink(bat) : RELAX_LINE;
     char t[12];
     snprintf(t, sizeof(t), bat >= 0 ? "%d%%" : "No battery", bat);
@@ -1155,7 +1154,6 @@ inline void update(uint32_t now) {
     lv_obj_set_style_text_color(u.battery_num, lv_color_hex(ink), 0);
     lv_arc_set_value(u.battery_ring, bat >= 0 ? bat : 100);
     lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(ink), LV_PART_INDICATOR);
-    bool usb = u.on_usb && u.on_usb();
     arc_text(u.name_arc, "Battery", NAME);
     if (usb && bat >= 0) arc_text(u.status_arc, "Charging", LIVE, true);  // green working-line shimmer
     else if (usb) arc_text(u.status_arc, "USB power", RELAX_LINE);
