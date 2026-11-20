@@ -116,6 +116,13 @@ lvgl:
 # CPU_FREQ_MAX lock (240) while the screen is on and either USB is in or the dial booted under 120 s ago. Dark, or on
 # battery after that: back to scaling.
 interval:
+  # Silence loop: 50 ms of zeros every 50 ms into the mixer (16 kHz mono 16-bit = 1600 bytes). Never blocks; a full
+  # buffer just drops the write.
+  - interval: 50ms
+    then:
+      - lambda: |-
+          static const uint8_t zeros[1600] = {};
+          id(silence_mixing_input).play(zeros, sizeof(zeros), 0);
   - interval: 1s
     then:
       - lambda: |-
@@ -196,6 +203,11 @@ speaker:
       - id: media_mixing_input
         buffer_duration: 100ms
         timeout: 500ms
+      # Fed zeros forever by the interval below, so the mixer and I2S never stop: the DAC sits on digital silence with
+      # the amp on (no RF hum on an idle output, no clipped start when a sound begins).
+      - id: silence_mixing_input
+        buffer_duration: 100ms
+        timeout: 500ms
   - platform: resampler
     id: announcement_resampler
     output_speaker: announcement_mixing_input
@@ -210,6 +222,7 @@ speaker:
 media_player:
   - platform: speaker
     id: player
+    name: Speaker  # named: an unnamed entity is internal (cv.py), and the bridge needs it over the API for /speak
     # Read buffer per pipeline, in PSRAM. The old dial config used 2MB for its MP3 stream; 512KB each here, since the
     # character pack also lives in PSRAM.
     buffer_size: 512000
@@ -222,17 +235,6 @@ media_player:
       speaker: media_resampler
       format: NONE  # every codec (the default, FLAC only, rejected MP3 with ESP_ERR_NOT_SUPPORTED)
       num_channels: 1  # the ES8311 is mono, so decode straight to mono
-    # Amp on only while something plays: left on while idle, the speaker picks up RF noise.
-    on_play:
-      - switch.turn_on: speaker_amp
-    on_announcement:
-      - switch.turn_on: speaker_amp
-    on_idle:
-      - switch.turn_off: speaker_amp
-    on_pause:
-      - switch.turn_off: speaker_amp
-    on_turn_off:
-      - switch.turn_off: speaker_amp
 
 number:
   - platform: template
@@ -269,5 +271,5 @@ switch:
     pin:
       number: GPIO46
       ignore_strapping_warning: true  # board wiring: amp enable
-    restore_mode: ALWAYS_OFF  # the media player turns it on to play (above)
+    restore_mode: ALWAYS_ON  # always on; the silence loop keeps the DAC fed so it doesn't pick up RF
 
