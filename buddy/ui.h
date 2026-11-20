@@ -275,6 +275,11 @@ inline std::string cut(const std::string &s, int max) {
   }
   return s;
 }
+// The display name of a non-Claude agent (the `agent` field), or nullptr for Claude and anything unknown.
+inline const char *agent_name(const std::string &a) {
+  return a == "codex" ? "Codex" : a == "copilot" ? "Copilot" : nullptr;
+}
+
 inline std::string one_line(std::string s) {
   for (char &c : s)
     if (c == '\n' || c == '\r' || c == '\t') c = ' ';
@@ -1197,11 +1202,9 @@ inline void update(uint32_t now) {
   const esphome::claude_buddy::Bot *shown = nullptr;  // a Grok bot on the face instead of Clawd: its name tops the face
   bool recap = !running && !b->last_text().empty() && b->last_text_ms() > u.recap_cleared;
   // The reply card names whoever wrote it: a Grok bot (its name, in its colour), Codex, Copilot, else Claude.
-  auto reply_by = [&]() {
-    const auto &bot = b->last_bot();
+  auto who = [&](const esphome::claude_buddy::Bot &bot, const std::string &agent) {
     if (!bot.shape.empty()) shown = &bot;
-    else if (b->last_agent() == "codex") name = "Codex";
-    else if (b->last_agent() == "copilot") name = "Copilot";
+    else if (const char *n = agent_name(agent)) name = n;
   };
   bool waiting = s.waiting > 0;  // only reachable here once the prompt was put off
   bool bell_ok = false;          // the bell pill may show (not over a card)
@@ -1235,17 +1238,18 @@ inline void update(uint32_t now) {
     u.alert.stop();
     vis.on(u.card);
     vis.on(u.dismiss);
-    reply_by();
-  } else if (u.viewing) {
-    // A notice opened from the bell: that reply on the card, until Dismiss.
+    who(b->last_bot(), b->last_agent());
+  } else if (u.viewing || recap) {
+    // A notice opened from the bell (until Dismiss), or the finished turn's reply: that reply on the card.
+    const auto &bot = u.viewing ? u.notice.bot : b->last_bot();
+    const auto &agent = u.viewing ? u.notice.agent : b->last_agent();
+    const auto &text = u.viewing ? u.notice.text : b->last_text();
     u.scene.stop();
     u.alert.stop();
     vis.on(u.card);
     vis.on(u.dismiss);
-    if (!u.notice.bot.shape.empty()) shown = &u.notice.bot;
-    else if (u.notice.agent == "codex") name = "Codex";
-    else if (u.notice.agent == "copilot") name = "Copilot";
-    show_card(cut(one_line(u.notice.text), RECAP_MAX), now);
+    who(bot, agent);
+    show_card(cut(one_line(text), RECAP_MAX), now);
     arc_text(u.status_arc, "", RELAX_LINE);
   } else if (running) {
     bell_ok = true;
@@ -1258,7 +1262,7 @@ inline void update(uint32_t now) {
       title_rgb = !av.shape.empty() ? av.rgb : provider_ink(ag.empty() ? "claude" : ag);
     }
     const scene::Scene *sc = av.shape.empty() ? nullptr : character::find(("grok_" + av.shape).c_str());
-    const char *agent = ag == "codex" ? "Codex" : ag == "copilot" ? "Copilot" : nullptr;
+    const char *agent = agent_name(ag);
     const scene::Scene *cx = agent ? character::find((ag + "_work").c_str()) : nullptr;
     if (sc) {
       u.scene.play(sc, now, 4);
@@ -1308,14 +1312,6 @@ inline void update(uint32_t now) {
       }
       vis.on(u.dots);
     }
-  } else if (recap) {
-    u.scene.stop();
-    u.alert.stop();
-    vis.on(u.card);
-    vis.on(u.dismiss);
-    reply_by();
-    show_card(cut(one_line(b->last_text()), RECAP_MAX), now);
-    arc_text(u.status_arc, "", RELAX_LINE);
   } else {
     u.alert.stop();
     // Idle: providers take turns, switching as each usage flash starts: Clawd juggles, Codex's pet and Copilot's head
