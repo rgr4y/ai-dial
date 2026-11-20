@@ -36,21 +36,18 @@ Each line is one Claude desktop Hardware Buddy JSON object
 - **Heartbeat.** Sent on every change, coalesced over 150 ms, plus a 10 s keepalive. The dial counts 30 s of
   silence as offline.
   ```json
-  {"total":2,"running":1,"waiting":1,"msg":"approve: Bash",
+  {"total":2,"running":1,"waiting":1,
    "prompt":{"id":"p3-mwm6…","tool":"Bash","hint":"api: rm -rf /tmp/x"}}
   ```
   `prompt` is the oldest waiting permission. It is absent when nothing is waiting.
-  `"avatar":"cloud","avatar_color":48294` appear when the session shown as working is a Grok Bot one: its bot's
-  shape (a pack scene `grok_<avatar>`, from `art/grok/`) and colour (0xRRGGBB, from the roster). The dial plays
-  that scene with its body tinted, in place of cook or build. Any hook event that carries `avatar` and
-  `avatar_color` gives its session that look, so `curl` can test it.
   `"work":[{"id":"s1","name":"auto-ai","tool":"Edit"},{"id":"s2","name":"auto-ai","tool":"Bash","agent":"codex"}]`
   lists every working session, ordered by session start (stable, so swiping on the dial doesn't shuffle). `name` is the
   session's `/rename` title, else its directory; `tool` is its current tool (empty at a prompt); `agent`, or `avatar`
-  plus `avatar_color`, as below. Absent when nothing works. `"latest":"s1"` is the id of the one that did something
-  last: the dial falls back to it when its focused session ends. The flat fields (`msg`, `agent`, `avatar`, …) still
-  describe that latest session, so firmware that ignores `work` behaves as before.
-  `"agent":"codex"` or `"agent":"copilot"` appears when the session shown as working came through `hook.sh codex`
+  plus `avatar_color`, as below. `avatar` and `avatar_color` (0xRRGGBB) mark a Grok Bot session: its bot's shape (a pack
+  scene `grok_<avatar>`, from `art/grok/`) and colour. The dial plays that scene with its body tinted, in place of
+  cook or build. Any hook event that carries `avatar` and `avatar_color` gives its session that look, so `curl` can test it. Absent when nothing works. `"latest":"s1"` is the id of the one that did something
+  last: the dial falls back to it when its focused session ends.
+  A session's `"agent":"codex"` or `"agent":"copilot"` appears when it came through `hook.sh codex`
   or `hook.sh copilot` (installed in `~/.codex/hooks.json` and `~/.copilot/settings.json` by `bridge/install.mjs`).
   The dial plays `codex_work` or `copilot_work` in place of cook or build.
   `"bots":[["cloud",48294],["wedge",16750592]]` lists every distinct Grok bot look in the rosters (absent with no

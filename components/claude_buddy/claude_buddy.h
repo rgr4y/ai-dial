@@ -51,17 +51,14 @@ struct UsageCard {
 
 struct Snapshot {
   uint32_t total = 0, running = 0, waiting = 0;
-  std::string msg;
   std::string prompt_id, prompt_tool, prompt_hint;  // prompt_id empty = no permission pending
   std::string usage;      // plan usage line from the bridge, e.g. "5h 15% · wk 19% · 2h 41m"
   uint32_t usage_pct = 0; // the higher of the 5-hour and weekly utilisation
   std::vector<UsageCard> usages;  // only while the dial shows the usage screen (bridge sends it then)
   std::string usages_key;         // usages as raw JSON: the UI rebuilds when it changes
   std::string assets_url, assets_rev;  // character pack the bridge serves (buddy/character.h)
-  std::string agent;      // busy session's agent when not Claude Code ("codex"); empty otherwise
-  Bot avatar;             // busy Grok Bot session's bot; shape empty otherwise
   std::vector<Bot> bots;  // every known Grok bot: the idle face cycles them
-  std::vector<Work> work;     // every working session, in start order (empty from an older bridge)
+  std::vector<Work> work;     // every working session, in start order
   std::string latest;         // id of the working session active last: focus falls back to it
   uint32_t at_ms = 0;                               // millis() of the last heartbeat; 0 = never
 };

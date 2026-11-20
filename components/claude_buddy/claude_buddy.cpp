@@ -62,7 +62,6 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     s.total = doc["total"] | 0u;
     s.running = doc["running"] | 0u;
     s.waiting = doc["waiting"] | 0u;
-    s.msg = doc["msg"] | "";
     s.usage = doc["usage"] | "";
     s.usage_pct = doc["usage_pct"] | 0u;
     s.usages.clear();
@@ -79,8 +78,6 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     }
     s.assets_url = doc["assets"]["url"] | "";
     s.assets_rev = doc["assets"]["rev"] | "";
-    s.agent = doc["agent"] | "";
-    s.avatar = bot_of(doc);
     s.bots.clear();
     for (JsonArray b : doc["bots"].as<JsonArray>())
       s.bots.push_back({b[0] | "", b[1] | 0xFFFFFFu, b[2] | ""});

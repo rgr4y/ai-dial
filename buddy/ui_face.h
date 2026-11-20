@@ -24,10 +24,12 @@ inline void face_running(Vis &vis, const Frame &f, Face &fc) {
   const esphome::claude_buddy::Work *fw = f.fw;
   bool waiting = s.waiting > 0;
   fc.bell_ok = true;
-  // The focused session's look (heartbeat `work`; an older bridge sends only the flat fields for the latest one): a
-  // Grok Bot session shows its own bot (`avatar`), Codex and Copilot their pets (`agent`), else Clawd cooks or builds.
-  const auto &av = fw ? fw->avatar : s.avatar;
-  const std::string &ag = fw ? fw->agent : s.agent;
+  // The focused session's look (heartbeat `work`): a Grok Bot session shows its own bot (`avatar`), Codex and Copilot
+  // their pets (`agent`), else Clawd cooks or builds.
+  static const esphome::claude_buddy::Bot no_bot;
+  static const std::string no_agent;
+  const auto &av = fw ? fw->avatar : no_bot;
+  const std::string &ag = fw ? fw->agent : no_agent;
   if (fw) {
     fc.title = sessions::label(s.work, fi);
     fc.title_rgb = !av.shape.empty() ? av.rgb : provider_ink(ag.empty() ? "claude" : ag);
@@ -38,7 +40,6 @@ inline void face_running(Vis &vis, const Frame &f, Face &fc) {
   if (sc) {
     u.scene.play(sc, now, 4);
     u.scene.set_tint(av.rgb);
-    if (!fw) fc.shown = &s.avatar;
   } else if (cx) {
     u.scene.play(sc = cx, now, 4);
     fc.name = agent;
@@ -57,11 +58,10 @@ inline void face_running(Vis &vis, const Frame &f, Face &fc) {
   } else {
     u.alert.stop();
   }
-  // Live line "<verb>… m:ss" in voice green (focus.c:764-791). Verb: the focused session's tool (the heartbeat's msg
-  // when there is no `work`), else a gerund.
+  // Live line "<verb>… m:ss" in voice green (focus.c:764-791). Verb: the focused session's tool, else a gerund.
   char el[16], line[64];
   fmt_elapsed(el, sizeof(el), now - u.work_start);
-  const std::string &said = fw ? fw->tool : s.msg;
+  const std::string &said = fw ? fw->tool : std::string();
   std::string verb = said.empty() ? GERUNDS[(now - u.work_start) / GERUND_MS % (sizeof(GERUNDS) / sizeof(GERUNDS[0]))]
                                   : cut(one_line(said), 18);
   snprintf(line, sizeof(line), "%s\xE2\x80\xA6 %s", verb.c_str(), el);

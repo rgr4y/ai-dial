@@ -143,24 +143,16 @@ export class Board {
     // Read-only waits (no allow/deny): count and first project, so the dial can show "waiting on the Mac".
     const pend = all.filter((s) => s.pending).sort((a, b) => a.pending.at - b.pending.at);
     // Every working session, in the order they started: stable while the dial swipes between them. `latest` is the one
-    // that did something last (the dial's fallback when the focused one ends); the flat fields below describe it.
+    // that did something last (the dial's fallback when the focused one ends).
     const work = all.filter((s) => s.status === 'working').sort((a, b) => a.born - b.born).map((s) => ({
       id: s.id, name: s.project, tool: s.tool, ...(s.agent && { agent: s.agent }),
       ...(s.avatar && { avatar: s.avatar, avatar_color: s.avatar_color }) }));
-    const hb = { total: all.length, running: working.length, waiting: waiting.length, msg: '',
+    const hb = { total: all.length, running: working.length, waiting: waiting.length,
                  ...(pend.length && { watching: pend.length }),
                  ...(work.length && { work, latest: working[0].id }) };
     if (waiting.length) {
       const p = waiting[0].prompt;
-      hb.msg = `approve: ${p.tool}`;
       hb.prompt = { id: p.id, tool: p.tool, hint: p.hint };
-    } else if (pend.length) {
-      hb.msg = `${pend[0].project} waiting on the Mac`;
-    } else if (working.length) {
-      const w = working[0];
-      hb.msg = w.tool ? `${w.project} ${w.tool}` : w.project;
-      if (w.agent) hb.agent = w.agent;
-      if (w.avatar) Object.assign(hb, { avatar: w.avatar, avatar_color: w.avatar_color, avatar_name: w.project });
     }
     return hb;
   }

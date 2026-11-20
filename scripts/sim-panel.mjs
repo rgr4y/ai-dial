@@ -32,10 +32,10 @@ const SESSIONS = [{ id: 's1', name: 'auto-ai', tool: 'Edit' }, { id: 's2', name:
 function pin(mode, [shape, color, name]) {
   const lines = [];
   const hb = mode === 'multi' || mode === 'notice'
-    ? { total: 3, running: 3, waiting: 0, msg: 'auto-ai Edit', work: SESSIONS, latest: 's1' }
+    ? { total: 3, running: 3, waiting: 0, work: SESSIONS, latest: 's1' }
     : mode === 'work'
-    ? { total: 1, running: 1, waiting: 0, msg: `${name} working`, avatar: shape, avatar_color: color, avatar_name: name }
-    : { total: 0, running: 0, waiting: 0, msg: '' };
+    ? { total: 1, running: 1, waiting: 0, work: [{ id: 's1', name, tool: '', avatar: shape, avatar_color: color }], latest: 's1' }
+    : { total: 0, running: 0, waiting: 0 };
   lines.push({ ...hb, bots: [[shape, color, name]] });
   if (mode === 'reply') lines.push({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: 'auto-ai: All tests pass. Anything else?' }], sid: 's1' });
   if (mode === 'notice') lines.push({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: 'auto-ai: All tests pass.' }], sid: 's2', busy: 2, agent: 'codex' });

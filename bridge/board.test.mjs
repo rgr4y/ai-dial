@@ -9,7 +9,7 @@ test('a prompt makes the session working, Stop makes it idle with a turn', () =>
   b.event(ev('UserPromptSubmit'), 1000);
   assert.equal(b.heartbeat(1000).running, 1);
   b.event(ev('PreToolUse', { tool_name: 'Bash', tool_input: { command: 'ls  -la' } }), 2000);
-  assert.equal(b.heartbeat(2000).msg, 'proj Bash');
+  assert.equal(b.heartbeat(2000).work[0].tool, 'Bash');
   const r = b.event(ev('Stop', { last_assistant_message: 'All done.' }), 3000);
   assert.equal(r.turn, 'proj: All done.');
   const hb = b.heartbeat(3000);
@@ -74,7 +74,6 @@ test('Grok pending ask is display-only: waiting, no prompt, cleared by resolve o
   let hb = b.heartbeat(1000);
   assert.equal(b.sessions.get('s1').status, 'waiting');
   assert.deepEqual([hb.waiting, hb.running, hb.watching, hb.prompt], [0, 0, 1, undefined]);
-  assert.equal(hb.msg, 'proj waiting on the Mac');
   b.event(ev('GrokPermissionResolved', { request_id: 'ab'.repeat(32) }), 2000);
   hb = b.heartbeat(2000);
   assert.deepEqual([b.sessions.get('s1').status, hb.watching, hb.running], ['working', undefined, 1]);
@@ -88,30 +87,30 @@ test('a Grok Bot session busy shows its avatar; a Claude session does not', () =
   b.event(ev('UserPromptSubmit', { avatar: 'cloud', avatar_color: 0x00BCA6 }), 1000);
   b.event(ev('PreToolUse', { tool_name: 'run-command' }), 1500);  // later events carry it too; the session keeps it
   let hb = b.heartbeat(1500);
-  assert.deepEqual([hb.avatar, hb.avatar_color, hb.avatar_name], ['cloud', 0x00BCA6, 'proj']);
+  assert.deepEqual([hb.work[0].avatar, hb.work[0].avatar_color, hb.work[0].name], ['cloud', 0x00BCA6, 'proj']);
   b.event(ev('UserPromptSubmit', { session_id: 's2', cwd: '/w/other' }), 2000);
   hb = b.heartbeat(2000);
-  assert.equal(hb.msg, 'other');
-  assert.equal(hb.avatar, undefined);
+  assert.equal(hb.work[1].name, 'other');
+  assert.equal(hb.work[1].avatar, undefined);
   b.event(ev('Stop', { session_id: 's2' }), 3000);
   b.event(ev('Stop'), 3000);
-  assert.equal(b.heartbeat(3000).avatar, undefined);
+  assert.equal(b.heartbeat(3000).work, undefined);
 });
 
 test('a busy Codex session sends its agent', () => {
   const b = new Board();
   b.event(ev('UserPromptSubmit', { agent: 'codex' }), 1000);
   b.event(ev('PreToolUse', { agent: 'codex', tool_name: 'Bash' }), 1500);
-  assert.equal(b.heartbeat(1500).agent, 'codex');
+  assert.equal(b.heartbeat(1500).work[0].agent, 'codex');
   b.event(ev('Stop', { agent: 'codex' }), 2000);
-  assert.equal(b.heartbeat(2000).agent, undefined);
+  assert.equal(b.heartbeat(2000).work, undefined);
 });
 
 test('Copilot -p: prompt before a new SessionStart stays working; a resumed start goes idle', () => {
   const b = new Board();
   b.event(ev('UserPromptSubmit', { agent: 'copilot' }), 1000);
   b.event(ev('SessionStart', { agent: 'copilot', source: 'new' }), 1100);
-  assert.equal(b.heartbeat(1100).agent, 'copilot');
+  assert.equal(b.heartbeat(1100).work[0].agent, 'copilot');
   b.event(ev('SessionStart', { agent: 'copilot', source: 'resume' }), 1200);
   assert.equal(b.heartbeat(1200).running, 0);
 });
@@ -133,9 +132,9 @@ test('a reply names its speaker: a Grok bot by its look, Codex by agent, Claude 
 test('a session name (Claude Code /rename) replaces the dirname', () => {
   const b = new Board();
   b.event(ev('UserPromptSubmit', { cwd: '/w/autonomous-ai', session_name: 'auto-ai' }), 1000);
-  assert.equal(b.heartbeat(1000).msg, 'auto-ai');
+  assert.equal(b.heartbeat(1000).work[0].name, 'auto-ai');
   b.event(ev('PreToolUse', { cwd: '/w/autonomous-ai', tool_name: 'Bash' }), 1100);  // no name on this event: keeps it
-  assert.equal(b.heartbeat(1100).msg, 'auto-ai Bash');
+  assert.equal(b.heartbeat(1100).work[0].tool, 'Bash');
 });
 
 test('work lists every working session in start order; latest is the one active last', () => {
@@ -150,8 +149,7 @@ test('work lists every working session in start order; latest is the one active 
   assert.equal(hb.work[0].tool, 'Edit');
   assert.equal(hb.work[2].agent, 'codex');
   assert.equal(hb.latest, 'a');
-  assert.equal(hb.running, 3);  // flat fields unchanged for old firmware
-  assert.equal(hb.msg, 'auto-ai Edit');
+  assert.equal(hb.running, 3);
   b.event({ ...ev('Stop'), session_id: 'a' }, 5000);
   assert.deepEqual(b.heartbeat(5000).work.map((w) => w.id), ['b', 'c']);
   assert.equal(new Board().heartbeat(0).work, undefined);
