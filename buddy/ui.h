@@ -67,11 +67,12 @@ static constexpr int SPLASH_BIAS = -50;      // splash: pet sits above the wordm
 static constexpr uint32_t USAGE_ALARM_PCT = 80;  // at or above: the flash also pulses a big red % mid-screen
 static constexpr int RECAP_MAX = 2000;          // codepoints; focus.c:793 cut at 90, the card now scrolls instead
 // Recap card past 4 lines: hold at the top, scroll to the end, hold, scroll back up quicker, repeat.
-static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 30, CARD_BACK_PX_S = 120;
+static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 60, CARD_BACK_PX_S = 120;
 // Finger-scrolled card: autoscroll resumes this long after the last touch or scroll movement.
 static constexpr uint32_t CARD_MANUAL_MS = 5000;
-// A reply card untouched this long (since the reply or the last touch / scroll) moves to the bell. USB or battery alike.
-static constexpr uint32_t REPLY_TO_BELL_MS = 120000;
+// A reply card moves to the bell once read: untouched, after one full autoscroll pass (down and back), or after
+// CARD_SHORT_MS if it fits without scrolling. Once touched, after REPLY_TO_BELL_MS from the last touch. USB or battery.
+static constexpr uint32_t CARD_SHORT_MS = 10000, REPLY_TO_BELL_MS = 120000;
 
 // Voice (hold the face): LISTEN while the finger is down, WAIT for the bridge's final text, CONFIRM shows it (a tap
 // cancels), SEND for one update (the bridge types it into the session), NOTE a short message. Protocol: DIAL-PROTOCOL.md.
@@ -94,6 +95,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   int card_lines = 0;  // recap card height in lines (1-4), set when its text changes
   bool card_overflow = false, card_manual = false;  // text past 4 lines; finger has taken over the scroll
   uint32_t card_manual_at = 0;                      // last touch / scroll movement while manual
+  uint32_t card_shown_at = 0, card_pass_ms = 0;     // card text last changed; its read time (one pass, or CARD_SHORT_MS)
   lv_obj_t *dismiss = nullptr, *card = nullptr, *card_text = nullptr, *bell = nullptr, *bell_text = nullptr;
   lv_obj_t *word = nullptr, *sub = nullptr;                                  // brand (bridge offline)
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
@@ -877,10 +879,13 @@ inline void show_card(const std::string &text, uint32_t now) {
     int lines = full / 43 + 1;
     u.card_lines = std::min(lines, 4);
     u.card_overflow = lines > 4;
+    u.card_shown_at = now;
+    u.card_pass_ms = CARD_SHORT_MS;
     if (lines > 4) {
       lv_obj_set_height(u.card_text, 4 * 43);
       int dist = full - 4 * 43;
       start_card_anim(dist);
+      u.card_pass_ms = 2 * CARD_HOLD_MS + dist * 1000 / CARD_SCROLL_PX_S + dist * 1000 / CARD_BACK_PX_S;
     }
   }
   int h = u.card_lines * 43 + 2 * 21;
@@ -979,10 +984,12 @@ inline void update(uint32_t now) {
   auto &notices = b->notices();
   if (notices.size() > u.notice_n) activity(now);  // a reply from another session wakes the dial
   u.notice_n = notices.size();
-  // An unread reply card ages out: it becomes a bell notice and the face goes idle. Not a notice opened from the bell,
-  // not mid-voice. notice_n follows the push so it doesn't wake the dial.
+  // A read reply card ages out: it becomes a bell notice ("1 new") and the face goes idle. Not a notice opened from the
+  // bell, not mid-voice. Untouched since the card appeared: one autoscroll pass; touched: REPLY_TO_BELL_MS of quiet.
+  // notice_n follows the push so it doesn't wake the dial.
+  uint32_t read_ms = u.last_activity > u.card_shown_at ? REPLY_TO_BELL_MS : u.card_pass_ms;
   if (!running && u.view == View::FACE && !u.viewing && u.voice == Voice::OFF && !b->last_text().empty() &&
-      b->last_text_ms() > u.recap_cleared && now - u.last_activity >= REPLY_TO_BELL_MS) {
+      b->last_text_ms() > u.recap_cleared && u.card_pass_ms && now - u.last_activity >= read_ms) {
     b->queue_last_reply();
     u.recap_cleared = b->last_text_ms();
     u.notice_n = notices.size();
