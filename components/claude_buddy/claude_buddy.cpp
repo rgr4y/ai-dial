@@ -44,6 +44,11 @@ void ClaudeBuddy::decide_(const char *decision) {
   this->notify_();
 }
 
+// A Grok bot's look from a line's avatar / avatar_color / avatar_name; shape empty when absent.
+static Bot bot_of(JsonVariantConst o) {
+  return {o["avatar"] | "", o["avatar_color"] | 0xFFFFFFu, o["avatar_name"] | ""};
+}
+
 void ClaudeBuddy::feed_line(const std::string &line) {
   JsonDocument doc = json::parse_json(line);
   if (doc.isNull()) {
@@ -78,7 +83,7 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     s.assets_url = doc["assets"]["url"] | "";
     s.assets_rev = doc["assets"]["rev"] | "";
     s.agent = doc["agent"] | "";
-    s.avatar = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
+    s.avatar = bot_of(doc);
     s.bots.clear();
     for (JsonArray b : doc["bots"].as<JsonArray>())
       s.bots.push_back({b[0] | "", b[1] | 0xFFFFFFu, b[2] | ""});
@@ -133,14 +138,14 @@ void ClaudeBuddy::feed_line(const std::string &line) {
         if (t && *t && !read && (doc["busy"] | 0u) > 0) {
           // Other sessions are still working: keep the face on them and queue this reply (the bell).
           this->queue_notice({doc["sid"] | "", t, doc["agent"] | "",
-                              {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""}});
+                              bot_of(doc)});
           this->notify_();
           break;
         }
         if (t && *t) {
           this->last_text_ = t;
           this->last_text_ms_ = millis();
-          this->last_bot_ = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
+          this->last_bot_ = bot_of(doc);
           this->last_agent_ = doc["agent"] | "";
           this->last_sid_ = doc["sid"] | "";
           this->last_read_ = read;
