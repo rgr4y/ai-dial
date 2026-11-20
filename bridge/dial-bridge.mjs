@@ -201,6 +201,7 @@ function voiceStop(dial) {
     const text = cleanText(raw), focusedId = dial.ui?.sid;
     const ask = dial.ask;
     dial.ask = null;  // any outcome ends the question
+    log(`voice: heard ${text ? text.length + ' chars' : 'nothing'}${ask ? ' (answer to ask)' : ''}`);
     if (!text) return say(dial, { error: "Didn't catch that" });
     const sessions = sessionList(board);
     if (ask) {  // the answer to "Which session?": a name, then the original words go there
@@ -248,6 +249,7 @@ function queueSend(dial, sid, text, sessions, focusedId) {
     return say(dial, { error: 'No terminal for that session' });
   }
   dial.pending = { run: () => typeSession(sid, text) };
+  log(`voice: confirm -> ${sessions.find((s) => s.id === sid)?.name || sid} (${text.length} chars)`);
   say(dial, { final: sid === focusedId ? text : `${sessions.find((s) => s.id === sid)?.name || sid}: ${text}` });
 }
 // No session to send to: say "Which session?", and only once it has finished playing (or failed) tell the dial to listen
@@ -343,6 +345,8 @@ function answerPrompt(sid, promptId, decision) {
 // A "send" with nothing pending (the simulator's fake words) is ignored.
 function onUiForVoice(dial) {
   const v = dial.ui?.voice;
+  if (v !== dial.lastVoice) log(`voice: dial ${dial.host} ${dial.lastVoice ?? '-'} -> ${v ?? '-'}${dial.pending ? ' (pending)' : ''}`);
+  dial.lastVoice = v;
   if (v === 'wait' || v === 'confirm') return;
   const p = dial.pending;
   dial.pending = null;
