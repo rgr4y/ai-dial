@@ -4,7 +4,8 @@
 # make test    test:cpp, then test:node
 #   test:cpp   host C++ tests (tests/test_*.cpp)
 #   test:node  the bridge's npm test (node --test)
-# make flash   build and OTA the dial (DIAL=ip overrides; else .env.dialip, last good IP, found via mDNS if empty)
+# make flash   build and OTA the dial (DIAL=ip overrides; else .env.dialip, last good IP, found via mDNS if empty).
+#              Posts the result to the notify channel (.claude/channel/notify.ts) if a Claude session runs it.
 # Pets load from bridge/assets (DIAL_ASSETS overrides). Logs land in build/*.log as well as the terminal.
 
 DIAL ?=
@@ -46,7 +47,11 @@ sim-panel:  # controls for the sim (scripts/sim-panel.mjs): pick a bot, pin it w
 flash: dialip
 	@mkdir -p build
 	ip=$(or $(DIAL),$$(cat .env.dialip)); \
-	esphome run claude-buddy.yaml --device $$ip --no-logs 2>&1 | tee build/flash.log && echo "$$ip" > .env.dialip
+	esphome run claude-buddy.yaml --device $$ip --no-logs 2>&1 | tee build/flash.log; \
+	if grep -q "OTA successful" build/flash.log; then echo "$$ip" > .env.dialip; msg="OTA successful"; rc=0; \
+	else msg="FAILED: $$(grep -E 'ERROR|error:' build/flash.log | tail -1)"; rc=1; fi; \
+	./notify.sh "make flash $$ip: $$msg"; \
+	exit $$rc
 
 logs: dialip
 	ip=$(or $(DIAL),$$(cat .env.dialip)); \
