@@ -20,6 +20,10 @@ export const ASK = 'Which session?', ASK_ARM_MS = 3000;  // the dial starts the 
 export function createVoiceFlow(d) {
   const { dials, board, say, log, PLAYING } = d;
 
+  // Sessions voice just typed into: their next reply is part of that conversation (sent to the dial as `read`).
+  const talked = new Set();
+  const takeTalked = (sid) => talked.delete(sid);
+
   function voiceStart(dial) {
     dial.stt?.abort();
     dial.pending = null;
@@ -112,7 +116,7 @@ export function createVoiceFlow(d) {
     const tty = board.tty(sid);
     if (!tty) return log(`voice: no terminal known for session ${sid}, dropped`);
     return d.typeIntoTty(tty, text).then(
-      (ok) => log(ok ? `voice: typed ${text.length} chars into ${tty}` : `voice: no iTerm session on ${tty}, dropped`),
+      (ok) => ok ? (talked.add(sid), log(`voice: typed ${text.length} chars into ${tty}`)) : log(`voice: no iTerm session on ${tty}, dropped`),
       (e) => log('voice: osascript failed:', e.message));
   }
 
@@ -193,5 +197,5 @@ export function createVoiceFlow(d) {
     if (v === 'send') p?.run();
   }
 
-  return { voiceStart, voiceStop, speak, onUiForVoice };
+  return { voiceStart, voiceStop, speak, onUiForVoice, takeTalked };
 }

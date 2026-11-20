@@ -4,6 +4,7 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
+#include <algorithm>
 #include <cstring>
 
 namespace esphome::claude_buddy {
@@ -113,11 +114,23 @@ void ClaudeBuddy::feed_line(const std::string &line) {
       this->notify_();
       return;
     }
+    // Seen: a new prompt went into that session (keyboard or voice). Its older replies are stale: drop its bell
+    // notices, and its reply card if that's what the card holds.
+    if (strcmp(evt, "seen") == 0) {
+      std::string sid = doc["sid"] | "";
+      auto &n = this->notices_;
+      n.erase(std::remove_if(n.begin(), n.end(), [&](const Notice &x) { return x.sid == sid; }), n.end());
+      if (!sid.empty() && sid == this->last_sid_) this->last_text_.clear();
+      this->notify_();
+      return;
+    }
     // Turn event: the assistant's text shows on the done card.
     if (strcmp(evt, "turn") == 0 && strcmp(doc["role"] | "", "assistant") == 0) {
       for (JsonVariant b : doc["content"].as<JsonArray>()) {
         const char *t = b["text"];
-        if (t && *t && (doc["busy"] | 0u) > 0) {
+        // `read`: a reply to words just sent by voice. You're in that conversation: show it now, never as a bell notice.
+        bool read = doc["read"] | false;
+        if (t && *t && !read && (doc["busy"] | 0u) > 0) {
           // Other sessions are still working: keep the face on them and queue this reply (the bell).
           this->queue_notice({doc["sid"] | "", t, doc["agent"] | "",
                               {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""}});
@@ -130,6 +143,7 @@ void ClaudeBuddy::feed_line(const std::string &line) {
           this->last_bot_ = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
           this->last_agent_ = doc["agent"] | "";
           this->last_sid_ = doc["sid"] | "";
+          this->last_read_ = read;
           this->notify_();
           break;
         }

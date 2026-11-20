@@ -355,3 +355,12 @@ test('voiceStart: a failing start response is logged and no stt opens', () => {
   f.voiceStart(m.dial);
   assert.ok(logs(m).includes('voice start on d1 failed: gone'));
 });
+test('takeTalked: true once for a session voice typed into, false otherwise', async () => {
+  const m = make({ route: { action: 'send', sid: 'a', text: 'run the tests', via: 'rule' } });
+  await m.hold();
+  assert.equal(m.flow.takeTalked('a'), false);  // not typed yet
+  await sent(m);
+  assert.equal(m.flow.takeTalked('b'), false);
+  assert.equal(m.flow.takeTalked('a'), true);
+  assert.equal(m.flow.takeTalked('a'), false);
+});

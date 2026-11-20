@@ -71,6 +71,11 @@ Each line is one Claude desktop Hardware Buddy JSON object
   `"sid":"<session id>"` names the session that wrote it. `"busy":2` appears when that many other sessions are still
   working: the dial then keeps its face on them and queues the reply as a notice (the bell pill, "2 new") instead of
   showing the card; tapping the bell opens the oldest. Without `busy` the card shows at once, as before.
+  `"read":true` (instead of `busy`) marks a reply from a session the bridge just typed voice words into: you are in
+  that conversation, so the card shows at once and, when it ages out, it is dropped instead of becoming a bell notice.
+- **Seen.** Sent on every `UserPromptSubmit` (a prompt typed at the keyboard, or voice words typed in):
+  `{"evt":"seen","sid":"<session id>"}`. That session's older replies are stale: the dial drops its bell notices, and
+  its reply card if the card holds that session's reply.
   When the writer isn't Claude Code, the turn names it, using the heartbeat's keys. The card then shows that writer's
   name on the top arc:
   ```json

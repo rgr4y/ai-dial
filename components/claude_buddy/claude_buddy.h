@@ -92,8 +92,11 @@ class ClaudeBuddy : public Component {
   std::vector<Notice> &notices() { return this->notices_; }  // oldest first; the UI pops them when read
   // Queue a notice (bell), dropping the oldest past 9.
   void queue_notice(Notice n);
-  // The reply on the card (last_text) becomes a notice, as if it had come in while other sessions worked.
-  void queue_last_reply() { this->queue_notice({this->last_sid_, this->last_text_, this->last_agent_, this->last_bot_}); }
+  // The reply on the card (last_text) becomes a notice, as if it had come in while other sessions worked. A voice
+  // conversation's reply (`read`) is already read: it just leaves.
+  void queue_last_reply() {
+    if (!this->last_read_) this->queue_notice({this->last_sid_, this->last_text_, this->last_agent_, this->last_bot_});
+  }
   void approve() { this->decide_("once"); }
   void deny() { this->decide_("deny"); }
 
@@ -107,6 +110,7 @@ class ClaudeBuddy : public Component {
   std::string answered_id_;  // last prompt decided on this device
   std::string last_text_;
   uint32_t last_text_ms_{0};
+  bool last_read_{false};  // last_text answers a voice send (evt:turn `read`)
   Bot last_bot_;
   std::string last_agent_, last_sid_;
   VoiceLine voice_;

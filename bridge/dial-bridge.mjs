@@ -180,7 +180,7 @@ const PLAYING = pb.MediaPlayerState.MEDIA_PLAYER_STATE_PLAYING;  // the API repo
 // The flow itself (hold -> STT -> route -> confirm -> send, the session question, the speak queue) is voiceflow.mjs;
 // this wires in the board, router, iTerm, Wyoming and the protobuf messages. Speaking: text -> claude-speak rules ->
 // Wyoming TTS (WAV) -> served at tts/<id>.wav on the assets port -> media_player announcement on the dial.
-const { voiceStart, voiceStop, speak, onUiForVoice } = createVoiceFlow({
+const { voiceStart, voiceStop, speak, onUiForVoice, takeTalked } = createVoiceFlow({
   dials, board, say, log, PLAYING, sessionList, route, routerEnv: ROUTER_ENV, routerTimeoutMs: ROUTER_TIMEOUT_MS,
   openStt: (onPartial) => openStt({ host: STT_HOST, port: STT_PORT, onPartial }),
   cleanText, answerPrompt, typeIntoTty, typeIntoTmuxSession, tmuxHasSession, assistant: ASSISTANT,
@@ -393,7 +393,13 @@ function onEvent(ev) {
   if (!ev.agent) ev.session_name ??= sessionName(ev.transcript_path);  // Claude Code only: others have no transcript title
   const r = board.event(ev, Date.now());
   if (r.cleared && waiters.has(r.cleared)) waiters.get(r.cleared)(null);
-  if (r.turn) sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], sid: r.sid, ...(r.busy && { busy: r.busy }), ...r.speaker });
+  // A new prompt (typed at the keyboard or by voice) makes that session's older replies stale on the dial.
+  if (ev.hook_event_name === 'UserPromptSubmit' && ev.session_id) sendLine({ evt: 'seen', sid: ev.session_id });
+  if (r.turn) {
+    const read = takeTalked(r.sid);  // a reply to a voice send: shown now, never queued to the bell
+    sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], sid: r.sid,
+               ...(read ? { read } : r.busy && { busy: r.busy }), ...r.speaker });
+  }
   push();
 }
 
