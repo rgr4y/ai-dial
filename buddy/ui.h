@@ -49,6 +49,9 @@ inline uint32_t provider_ink(const std::string &name, uint32_t other = TEXT) {
 }
 
 // ---- timings ----
+// Voice edge rejection: a hold starts listening only if it began and is still inside this radius (px from the centre,
+// screen radius 233). touch-test.yaml: picking the dial up lands at r 173-240, sometimes held 0.5-1 s.
+static constexpr float VOICE_EDGE_R = 160;
 static constexpr uint32_t SLEEP_MS = 300000;    // screen auto-sleep (display_habitat.c:405)
 static constexpr uint32_t BOOT_AWAKE_MS = 60000; // never idle-sleep in the first minute after boot
 static constexpr uint32_t OTA_FAIL_MS = 5000;  // failed-update page stays this long
@@ -97,6 +100,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   static constexpr int DOTS_MAX = 8, DOT_PITCH = 18, DOT_D = 12;
   lv_obj_t *dots = nullptr, *dot[DOTS_MAX] = {};
   std::string dots_txt;  // "2/3": what the dots show, also the mirror's `dots`
+  lv_point_t press_pt = {};  // where the current touch began (voice edge rejection)
   std::string focus_id;  // the working session the face shows (sticky: only a swipe, the bell or its end moves it)
   bool viewing = false;  // a notice's reply is on the card (opened with the bell)
   esphome::claude_buddy::Notice notice;  // that reply
@@ -574,6 +578,10 @@ inline void on_hold(lv_event_t *) {
   uint32_t now = lv_tick_get();
   if (u.voice != Voice::OFF || u.view != View::FACE || u.asleep) return;
   activity(now);
+  lv_point_t at = {};
+  if (lv_indev_t *in = lv_indev_active()) lv_indev_get_point(in, &at);
+  auto inside = [](lv_point_t p) { return hypotf(p.x - 233.0f, p.y - 233.0f) < VOICE_EDGE_R; };
+  if (!inside(u.press_pt) || !inside(at)) return;  // a grip at the rim, not a hold on the face
   u.voice_sid = voice_target();
   u.voice_text.clear();
   // No session on the face (idle, card dismissed) still listens: the bridge's router picks one by name, else asks.
@@ -609,6 +617,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_add_event_cb(root, on_hold, LV_EVENT_LONG_PRESSED, nullptr);  // hold = talk (the card's text bubbles to the card)
   if (lv_indev_t *in = lv_indev_get_next(nullptr)) {
     lv_indev_set_long_press_time(in, 650);  // spec §3: hold 650 ms
+    lv_indev_add_event_cb(in, [](lv_event_t *) { lv_indev_get_point(lv_indev_active(), &ui().press_pt); },
+                          LV_EVENT_PRESSED, nullptr);
   }
 
   u.scene.create(root);
