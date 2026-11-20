@@ -102,13 +102,13 @@ interval:
           gaze::Look look = gaze::look();
           buddyui::ui().scene.set_gaze(look.on, look.x, look.y);
           buddyui::tick(millis());
-          if (buddyui::take_wake()) {
+          if (buddyui::ui().take_wake()) {
             id(lvgl_comp).set_paused(false, false);
             auto c = id(display_brightness).turn_on();
             c.set_transition_length(300);
             c.perform();
           }
-          if (buddyui::take_sleep()) {
+          if (buddyui::ui().take_sleep()) {
             auto c = id(display_brightness).turn_off();
             c.set_transition_length(1000);
             c.perform();

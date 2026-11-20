@@ -1492,8 +1492,5 @@ inline void ota(int state, float pct, uint8_t err) {
   lv_refr_now(nullptr);
 }
 
-// YAML hooks, polled from the 50 ms interval: take_wake() -> fade the panel in, take_sleep() -> fade it out.
-inline bool take_wake() { return ui().take_wake(); }
-inline bool take_sleep() { return ui().take_sleep(); }
 
 }  // namespace buddyui
