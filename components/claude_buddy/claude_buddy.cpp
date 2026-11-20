@@ -70,6 +70,7 @@ void ClaudeBuddy::feed_line(const std::string &line) {
     }
     s.assets_url = doc["assets"]["url"] | "";
     s.assets_rev = doc["assets"]["rev"] | "";
+    s.agent = doc["agent"] | "";
     s.avatar = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
     s.bots.clear();
     for (JsonArray b : doc["bots"].as<JsonArray>())
@@ -97,6 +98,8 @@ void ClaudeBuddy::feed_line(const std::string &line) {
         if (t && *t) {
           this->last_text_ = t;
           this->last_text_ms_ = millis();
+          this->last_bot_ = {doc["avatar"] | "", doc["avatar_color"] | 0xFFFFFFu, doc["avatar_name"] | ""};
+          this->last_agent_ = doc["agent"] | "";
           this->notify_();
           break;
         }

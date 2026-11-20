@@ -40,6 +40,7 @@ export class Board {
       this.sessions.set(ev.session_id, s);
     }
     if (ev.cwd) s.project = basename(ev.cwd);
+    if (ev.agent) s.agent = ev.agent;  // hook.sh <agent>: not Claude Code (codex)
     if (ev.avatar) { s.avatar = ev.avatar; s.avatar_color = ev.avatar_color ?? 0xFFFFFF; }  // Grok Bot: its bot's look
     s.at = now;
     s.promptOnly = false;
@@ -51,10 +52,11 @@ export class Board {
     this.entries.length = Math.min(this.entries.length, 5);
   }
 
-  // Apply one hook event. Returns { cleared, turn } where cleared is the prompt id this event made moot
-  // (answered in the terminal) and turn is assistant text to show on the done card.
+  // Apply one hook event. Returns { cleared, turn, speaker } where cleared is the prompt id this event made moot
+  // (answered in the terminal), turn is assistant text to show on the done card, and speaker says who wrote it when
+  // that isn't Claude Code: { agent } (Codex, Copilot) or { avatar, avatar_color, avatar_name } (a Grok bot).
   event(ev, now) {
-    const out = { cleared: null, turn: null };
+    const out = { cleared: null, turn: null, speaker: null };
     if (!ev || !ev.session_id || !ev.hook_event_name) return out;
     const name = ev.hook_event_name;
     if (name === 'SessionEnd') {
@@ -93,7 +95,11 @@ export class Board {
       this._entry(now, s.project, 'done');
       const text = plainText(ev.last_assistant_message || '');
       if (text) out.turn = `${s.project}: ${text}`;
-    } else if (name === 'SessionStart') {
+      if (text && s.avatar) out.speaker = { avatar: s.avatar, avatar_color: s.avatar_color, avatar_name: s.project };
+      else if (text && s.agent) out.speaker = { agent: s.agent };
+    } else if (name === 'SessionStart' && ev.source !== 'new') {
+      // A resumed or cleared session starts idle. A new one already is; Copilot -p sends its UserPromptSubmit
+      // before SessionStart, so a new start must not undo that.
       s.status = 'idle';
     }
     return out;
@@ -151,6 +157,7 @@ export class Board {
     } else if (working.length) {
       const w = working[0];
       hb.msg = w.tool ? `${w.project} ${w.tool}` : w.project;
+      if (w.agent) hb.agent = w.agent;
       if (w.avatar) Object.assign(hb, { avatar: w.avatar, avatar_color: w.avatar_color, avatar_name: w.project });
     }
     return hb;

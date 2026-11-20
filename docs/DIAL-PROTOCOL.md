@@ -43,9 +43,12 @@ Each line is one Claude desktop Hardware Buddy JSON object
   shape (a pack scene `grok_<avatar>`, from `art/grok/`) and colour (0xRRGGBB, from the roster). The dial plays
   that scene with its body tinted, in place of cook or build. Any hook event that carries `avatar` and
   `avatar_color` gives its session that look, so `curl` can test it.
+  `"agent":"codex"` or `"agent":"copilot"` appears when the session shown as working came through `hook.sh codex`
+  or `hook.sh copilot` (installed in `~/.codex/hooks.json` and `~/.copilot/settings.json` by `bridge/install.mjs`).
+  The dial plays `codex_work` or `copilot_work` in place of cook or build.
   `"bots":[["cloud",48294],["wedge",16750592]]` lists every distinct Grok bot look in the rosters (absent with no
-  Grok Bot). The idle face takes turns: Clawd's relax, then each bot tinted, switching every 15 s as the usage flash
-  starts.
+  Grok Bot). The idle face takes turns by provider, switching every 15 s as the usage flash starts: Clawd's relax,
+  Codex's pet (pack scene `codex_relax`), Copilot's head (`copilot_relax`), then the next Grok bot tinted.
   The bridge adds `"usage":"Claude 5h 17% · 7d 19% · 2h 33m","usage_pct":19`: one provider's plan utilisation
   plus time to its reset. The source is CodexBar's HTTP server (`GET http://127.0.0.1:6969/usage`, override with
   `CODEXBAR_URL`; loopback needs no token), polled every minute, one entry per enabled provider that returned
@@ -57,12 +60,18 @@ Each line is one Claude desktop Hardware Buddy JSON object
   ```json
   {"evt":"turn","role":"assistant","content":[{"type":"text","text":"api: All tests pass."}]}
   ```
+  When the writer isn't Claude Code, the turn names it, using the heartbeat's keys. The card then shows that writer's
+  name on the top arc:
+  ```json
+  {"evt":"turn", ..., "avatar":"cloud","avatar_color":48294,"avatar_name":"Ada"}
+  {"evt":"turn", ..., "agent":"codex"}
+  ```
 
 ## 3. Dial → bridge (ESPHome text sensors)
 
 | Sensor | State |
 |---|---|
-| `buddy_decision` ("Buddy Decision") | `"<prompt id> once"` or `"<prompt id> deny"` after a tap on `[ allow ]` / `[ deny ]`. |
+| `buddy_decision` ("Buddy Decision") | `"<prompt id> once"` or `"<prompt id> deny"` after a tap on Allow / Deny. |
 | `buddy_ui` ("Buddy UI") | The **ui** object below. Published whenever what is on the glass changes. Also logged as `[buddyui] state {…}`, so a log follower (`esphome logs`) can rebuild the screen without the API. |
 
 **ui** (v1). Fields that are not on screen are left out.
@@ -72,7 +81,7 @@ Each line is one Claude desktop Hardware Buddy JSON object
  "status":{"text":"Brewing… 0:12","color":"#00ff2f","shimmer":true},   // lower arc
  "scene":"claude_relax|claude_work|claude_build|claude_send",          // pet scene playing
  "alert":"2",                                       // alert bubble count on the working scene
- "card":"api: All tests pass.", "small":6,          // recap card + small pet zoom (6 = 1.5x, 4 = 1x)
+ "card":"api: All tests pass.",                     // recap card (Dismiss button above it)
  "bell":"2 waiting",                                // bell pill
  "word":"Claude", "sub":"Waiting for the bridge",   // brand view
  "perm":{"title":"Allow Bash?","hint":"api: rm -rf /tmp/x","count":"1 of 2 waiting"},

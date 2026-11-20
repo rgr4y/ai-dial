@@ -98,3 +98,35 @@ test('a Grok Bot session busy shows its avatar; a Claude session does not', () =
   b.event(ev('Stop'), 3000);
   assert.equal(b.heartbeat(3000).avatar, undefined);
 });
+
+test('a busy Codex session sends its agent', () => {
+  const b = new Board();
+  b.event(ev('UserPromptSubmit', { agent: 'codex' }), 1000);
+  b.event(ev('PreToolUse', { agent: 'codex', tool_name: 'Bash' }), 1500);
+  assert.equal(b.heartbeat(1500).agent, 'codex');
+  b.event(ev('Stop', { agent: 'codex' }), 2000);
+  assert.equal(b.heartbeat(2000).agent, undefined);
+});
+
+test('Copilot -p: prompt before a new SessionStart stays working; a resumed start goes idle', () => {
+  const b = new Board();
+  b.event(ev('UserPromptSubmit', { agent: 'copilot' }), 1000);
+  b.event(ev('SessionStart', { agent: 'copilot', source: 'new' }), 1100);
+  assert.equal(b.heartbeat(1100).agent, 'copilot');
+  b.event(ev('SessionStart', { agent: 'copilot', source: 'resume' }), 1200);
+  assert.equal(b.heartbeat(1200).running, 0);
+});
+
+test('a reply names its speaker: a Grok bot by its look, Codex by agent, Claude Code by nothing', () => {
+  const b = new Board();
+  b.event(ev('UserPromptSubmit', { avatar: 'cloud', avatar_color: 0x00BCA6 }), 1000);
+  let r = b.event(ev('Stop', { last_assistant_message: 'Done.' }), 2000);
+  assert.deepEqual(r.speaker, { avatar: 'cloud', avatar_color: 0x00BCA6, avatar_name: 'proj' });
+  b.event(ev('UserPromptSubmit', { session_id: 's2', agent: 'codex' }), 3000);
+  r = b.event(ev('Stop', { session_id: 's2', last_assistant_message: 'Ok.' }), 4000);
+  assert.deepEqual(r.speaker, { agent: 'codex' });
+  b.event(ev('UserPromptSubmit', { session_id: 's3', cwd: '/w/cc' }), 5000);
+  r = b.event(ev('Stop', { session_id: 's3', cwd: '/w/cc', last_assistant_message: 'Hi.' }), 6000);
+  assert.equal(r.turn, 'cc: Hi.');
+  assert.equal(r.speaker, null);
+});

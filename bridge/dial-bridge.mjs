@@ -2,7 +2,7 @@
 // dial-bridge: agent hook events -> Claude Buddy dial, over the ESPHome native API.
 //
 //   hook.sh (Claude Code hooks, peon-ping adapters) --HTTP--> this daemon --ESPHome API--> dial
-//   dial [ allow ] / [ deny ] --text_sensor buddy_decision--> this daemon --> the waiting PermissionRequest hook
+//   dial Allow / Deny --text_sensor buddy_decision--> this daemon --> the waiting PermissionRequest hook
 //
 // HTTP on 127.0.0.1:${DIAL_BRIDGE_PORT:-19876}:
 //   POST /event       any hook JSON; answers at once
@@ -280,7 +280,7 @@ function body(req) {
 function onEvent(ev) {
   const r = board.event(ev, Date.now());
   if (r.cleared && waiters.has(r.cleared)) waiters.get(r.cleared)(null);
-  if (r.turn) sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }] });
+  if (r.turn) sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], ...r.speaker });
   push();
 }
 
