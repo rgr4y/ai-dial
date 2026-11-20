@@ -88,7 +88,6 @@ inline void on_root(lv_event_t *e) {
   update(now);
 }
 inline void on_reopen(lv_event_t *) { tap("bell"); }  // the bell pill or alert bubble: open the put-off prompt again
-inline void on_decide(lv_event_t *e) { tap(lv_event_get_target_obj(e) == ui().btn_allow ? "allow" : "deny"); }
 
 // BOOT key: "later" on an open prompt, the usage screen from the face, the battery page from usage, back to the face from anything else.
 inline void boot(uint32_t now) {
@@ -197,30 +196,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_ext_click_area(u.alert.layer[0], 14);  // bubble tap margin (ui_habitat.c:1206)
   lv_obj_add_event_cb(u.alert.layer[0], on_reopen, LV_EVENT_CLICKED, nullptr);
 
-  u.dismiss = mk_button(root, u.f.f25, "Dismiss");
-  lv_obj_add_event_cb(u.dismiss, on_dismiss, LV_EVENT_CLICKED, nullptr);
-  u.card = mk_card(root);
-  lv_obj_set_clickable(u.card, true);
-  lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(u.card, on_hold, LV_EVENT_LONG_PRESSED, nullptr);  // hold on a reply talks to its session
-  u.card_text = mk_label(u.card, u.f.f30, RECAP);
-  lv_obj_set_width(u.card_text, 348);  // card 368 - 2 x 10 pad
-  lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
-  lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
-  lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
-  // Drag target: it must be the pressed object for the indev to scroll it. EVENT_BUBBLE passes CLICKED up to u.card.
-  lv_obj_set_clickable(u.card_text, true);
-  lv_obj_set_scrollable(u.card_text, true);
-  lv_obj_set_event_bubble(u.card_text, true);
-  lv_obj_set_scroll_elastic(u.card_text, false);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
-  lv_obj_set_scroll_dir(u.card_text, LV_DIR_VER);
-  // Vertical only: text 348 > card content 344 (border counts), so a sideways drag chained up and slid the card.
-  lv_obj_set_scroll_chain_hor(u.card_text, false);
-  lv_obj_set_scrollable(u.card, false);
-  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_PRESSED, nullptr);
-  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_SCROLL, nullptr);
-  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_RELEASED, nullptr);
-  lv_obj_center(u.card_text);
+  build_card(root);
 
   // Bell pill (spec §2.6 colour, 0x006fff, fully rounded): 54 px tall in Inter 25 (spec: 32 / 20, too small a tap),
   // centred at y 388 so its corners stay inside the glass.
@@ -234,14 +210,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   u.bell_text = mk_label(u.bell, u.f.f25, NAME);
   lv_obj_center(u.bell_text);
 
-  // Brand / pairing (spec §5): wordmark "Claude" in Inter Bold 48 on a 50 px line at y 208.
-  u.word = mk_label(root, u.f.f48b, TEXT);
-  set_text(u.word, "Otto");
-  lv_obj_align(u.word, LV_ALIGN_TOP_MID, 0, 262);
-  u.sub = mk_label(root, u.f.f25, SECONDARY);
-  lv_obj_set_width(u.sub, 340);
-  lv_label_set_long_mode(u.sub, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_align(u.sub, LV_ALIGN_TOP_MID, 0, 270);
+  build_brand(root);
 
   // Usage alarm (new): big red percentage, scaled from its centre in tick().
   for (auto &o : u.burst) {
@@ -255,28 +224,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_style_transform_pivot_y(u.alarm, LV_PCT(50), 0);
   show(u.alarm, false);
 
-  // Permission (new; STOP layout, spec §2.8): question title, hint card, [deny] [allow].
-  u.perm = mk_page(root, true, false);  // gestures reach root
-  lv_obj_set_scrollable(u.perm, false);
-  u.perm_title = mk_label(u.perm, u.f.f30, NAME);
-  lv_obj_set_width(u.perm_title, 330);
-  lv_label_set_long_mode(u.perm_title, LV_LABEL_LONG_MODE_DOTS);
-  lv_obj_align(u.perm_title, LV_ALIGN_TOP_MID, 0, 132);
-  u.perm_hint = mk_label(u.perm, u.f.f25, RECAP);
-  lv_obj_set_width(u.perm_hint, 348);
-  lv_obj_set_height(u.perm_hint, 3 * lv_font_get_line_height(u.f.f25));  // 3 rows (spec §2.8)
-  lv_label_set_long_mode(u.perm_hint, LV_LABEL_LONG_MODE_DOTS);
-  lv_obj_align(u.perm_hint, LV_ALIGN_TOP_MID, 0, 190);
-  u.perm_count = mk_label(u.perm, u.f.f20, SECONDARY);
-  lv_obj_align(u.perm_count, LV_ALIGN_TOP_MID, 0, 290);
-  // Deny | Allow: centres 78 px either side of the middle, row centred on y 352 (clear of the status arc below
-  // and the "n of m waiting" count at y 290 above).
-  u.btn_deny = mk_button(u.perm, u.f.f25, "Deny", Btn::ERROR);
-  u.btn_allow = mk_button(u.perm, u.f.f25, "Allow", Btn::PRIMARY);
-  lv_obj_set_pos(u.btn_deny, -78, 352 - lv_obj_get_height(u.btn_deny) / 2);
-  lv_obj_set_pos(u.btn_allow, 78, 352 - lv_obj_get_height(u.btn_allow) / 2);
-  lv_obj_add_event_cb(u.btn_deny, on_decide, LV_EVENT_CLICKED, nullptr);
-  lv_obj_add_event_cb(u.btn_allow, on_decide, LV_EVENT_CLICKED, nullptr);
+  build_permission(root);
 
   // Page dots above the status line: DOTS_MAX small circles, placed and lit per update().
   u.dots = lv_obj_create(root);
@@ -292,35 +240,9 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   // Usage screen (BOOT): children made by build_usage().
   u.usage = mk_page(root, true, true);
 
-  // Battery page (BOOT, after usage): ring + big %, values set in update().
-  u.battery_page = mk_page(root, true, true);
-  u.battery_ring = lv_arc_create(u.battery_page);
-  lv_obj_set_size(u.battery_ring, 340, 340);  // outer radius 170: arc-label glyphs reach in to ~185
-  lv_obj_center(u.battery_ring);
-  lv_arc_set_rotation(u.battery_ring, 270);   // starts at 12 o'clock
-  lv_arc_set_bg_angles(u.battery_ring, 0, 360);
-  lv_arc_set_range(u.battery_ring, 0, 100);
-  lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_INDICATOR);
-  lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(CARD_RIM), LV_PART_MAIN);
-  lv_obj_remove_style(u.battery_ring, nullptr, LV_PART_KNOB);
-  lv_obj_set_clickable(u.battery_ring, false);
-  lv_obj_set_event_bubble(u.battery_ring, true);
-  u.battery_num = mk_label(u.battery_page, u.f.f96b, TEXT);
-  lv_obj_center(u.battery_num);
+  build_battery_page(root);
 
-  // OTA page: big % and a rect bar (like the usage bars), text on the arcs; values set by ota().
-  u.ota_page = mk_page(root, false, true);
-  u.ota_pct = mk_label(u.ota_page, u.f.f96b, TEXT);
-  lv_label_set_text(u.ota_pct, "0%");
-  lv_obj_align(u.ota_pct, LV_ALIGN_CENTER, 0, -30);
-  auto ota_rect = [&](int w, uint32_t col) {
-    lv_obj_t *o = mk_fill(u.ota_page, w, 14, 7, col);
-    lv_obj_set_pos(o, (scene::W - OTA_BAR_W) / 2, scene::C + 50);
-    return o;
-  };
-  ota_rect(OTA_BAR_W, 0x2a2c34);
-  u.ota_fill = ota_rect(OTA_BAR_MIN, provider_ink("Claude"));
+  build_ota_page(root);
 
   // Arcs last so they draw on top.
   u.name_arc = mk_arc(root, u.f.f26m, true);
@@ -417,34 +339,12 @@ inline void update(uint32_t now) {
   if (v != View::BRAND) u.was_live = true;
   bool usb = u.on_usb && u.on_usb();  // one PMU read each per update(): the face-side % and the battery page share them
   int bat = u.battery ? u.battery() : -1;
-  {  // face-side battery %: face only, always on battery, 60 s after plug-in / wake on USB
-    u.power_source(usb, now);
-    bool side = v == View::FACE && bat >= 0 && u.show_battery_side(usb, now);
-    show(u.bat_arc, side && !(usb && bat > 80));  // charging above 80%: the bolt alone
-    show(u.bat_bolt, side && usb);
-    if (side) {
-      char t[8];
-      snprintf(t, sizeof(t), "%d%%", bat);
-      bool changed = u.bat_txt != t || u.bat_shimmer != usb;
-      u.bat_txt = t;
-      u.bat_shimmer = usb;
-      if (usb && changed) {  // green shimmer (painted per tick) + bolt placed after the text
-        u.bat_phase = shimmer_phase(now);
-        shimmer_paint(u.bat_arc, u.bat_txt, LIVE, u.bat_phase);
-        place_bat_bolt();
-      } else if (!usb) {
-        if (changed) lv_arclabel_set_text(u.bat_arc, t);
-        lv_obj_set_style_text_color(u.bat_arc, lv_color_hex(power::battery_ink(bat)), 0);
-      }
-    } else {
-      u.bat_shimmer = false;
-    }
-  }
+  bool sending = now - u.sent_at < SEND_MS && u.sent_at;
+  Frame f{now, live, running, entered, usb, sending, fi, bat, fw};  // what the view painters read
+  paint_battery_side(v, f);  // face-side battery %: face only, always on battery, 60 s after plug-in / wake on USB
 
   // Everything off, then switch on what this view uses.
   Vis vis{u};
-  bool sending = now - u.sent_at < SEND_MS && u.sent_at;
-  [[maybe_unused]] Frame f{now, live, running, entered, usb, sending, fi, bat, fw};  // the view painters will read this
   const char *name = "Claude";
 
   // The pages stop the pet and the alert. Not hoisted into the face path: stop() clears sc, and a play() after it restarts.
@@ -458,65 +358,13 @@ inline void update(uint32_t now) {
     return;
   }
 
-  if (v == View::BRAND) {
-    // Splash (redesign of spec §2.1): the pet idling above the wordmark, and what the dial is waiting on
-    // shimmering on the lower arc. Same screen whenever the bridge goes quiet. (A spinner ring round the bezel was
-    // tried: too busy, and its redraws cost frame rate.)
-    if (entered) splash_in();
-    u.alert.stop();
-    u.scene.play(character::find("relax"), now, SPLASH_BIAS);
-    vis.on(u.word);
-#ifdef USE_WIFI
-    bool wifi = esphome::wifi::global_wifi_component && esphome::wifi::global_wifi_component->is_connected();
-#else
-    bool wifi = true;  // host sim: the network is the Mac's
-#endif
-    arc_text(u.name_arc, "", NAME);
-    arc_text(u.status_arc, !wifi ? "Connecting to Wi-Fi" : u.was_live ? "Bridge offline" : "Looking for the bridge",
-             SECONDARY, !u.loading);
-    return;
-  }
+  if (v == View::BRAND) return paint_brand(vis, f);
 
-  if (v == View::PERMISSION) {
-    arc_text(u.name_arc, name, provider_ink(name, NAME));  // USAGE and BATTERY name themselves; the face names whoever it shows
-    vis.on(u.perm);
-    std::string title = "Allow " + (s.prompt_tool.empty() ? std::string("this") : s.prompt_tool) + "?";
-    set_text(u.perm_title, title.c_str());
-    set_text(u.perm_hint, s.prompt_hint.empty() ? "Needs your answer" : s.prompt_hint.c_str());
-    char buf[32] = "";
-    if (s.waiting > 1) snprintf(buf, sizeof(buf), "1 of %u waiting", (unsigned) s.waiting);
-    set_text(u.perm_count, buf);
-    arc_text(u.status_arc, "swipe right for later", RELAX_LINE);
-    return;
-  }
+  if (v == View::PERMISSION) return paint_permission(vis, f);
 
-  if (v == View::USAGE) {
-    vis.on(u.usage);
-    if (entered || u.usage_key != s.usages_key) {
-      u.usage_key = s.usages_key;
-      build_usage();
-    }
-    arc_text(u.name_arc, "Usage", NAME);
-    arc_text(u.status_arc, "Tap to close", RELAX_LINE);
-    return;
-  }
+  if (v == View::USAGE) return paint_usage(vis, f);
 
-  if (v == View::BATTERY) {
-    vis.on(u.battery_page);
-    uint32_t ink = bat >= 0 ? power::battery_ink(bat) : RELAX_LINE;
-    char t[12];
-    snprintf(t, sizeof(t), bat >= 0 ? "%d%%" : "No battery", bat);
-    set_text(u.battery_num, t);
-    lv_obj_set_style_text_font(u.battery_num, bat >= 0 ? u.f.f96b : u.f.f30, 0);  // f96b has digits and % only
-    lv_obj_set_style_text_color(u.battery_num, lv_color_hex(ink), 0);
-    lv_arc_set_value(u.battery_ring, bat >= 0 ? bat : 100);
-    lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(ink), LV_PART_INDICATOR);
-    arc_text(u.name_arc, "Battery", NAME);
-    if (usb && bat >= 0) arc_text(u.status_arc, "Charging", LIVE, true);  // green working-line shimmer
-    else if (usb) arc_text(u.status_arc, "USB power", RELAX_LINE);
-    else arc_text(u.status_arc, "Tap to close", RELAX_LINE);
-    return;
-  }
+  if (v == View::BATTERY) return paint_battery(vis, f);
 
   // ---- FACE (spec §2.9) ----
   const esphome::claude_buddy::Bot *shown = nullptr;  // a Grok bot on the face instead of Clawd: its name tops the face

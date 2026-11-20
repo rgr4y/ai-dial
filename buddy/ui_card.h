@@ -1,5 +1,5 @@
 #pragma once
-#include "ui_widgets.h"
+#include "ui_voice.h"
 
 namespace buddyui {
 
@@ -89,6 +89,35 @@ inline void show_card(const std::string &raw, uint32_t now) {
   int top = 176 + (200 - h) / 2;  // centred in y 176-376 (focus.c:49-56)
   lv_obj_set_y(u.card, top);
   place_dismiss(top);
+}
+
+// Dismiss button and the reply card, built once in init().
+inline void build_card(lv_obj_t *root) {
+  Ui &u = ui();
+  u.dismiss = mk_button(root, u.f.f25, "Dismiss");
+  lv_obj_add_event_cb(u.dismiss, on_dismiss, LV_EVENT_CLICKED, nullptr);
+  u.card = mk_card(root);
+  lv_obj_set_clickable(u.card, true);
+  lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
+  lv_obj_add_event_cb(u.card, on_hold, LV_EVENT_LONG_PRESSED, nullptr);  // hold on a reply talks to its session
+  u.card_text = mk_label(u.card, u.f.f30, RECAP);
+  lv_obj_set_width(u.card_text, 348);  // card 368 - 2 x 10 pad
+  lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
+  lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
+  lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
+  // Drag target: it must be the pressed object for the indev to scroll it. EVENT_BUBBLE passes CLICKED up to u.card.
+  lv_obj_set_clickable(u.card_text, true);
+  lv_obj_set_scrollable(u.card_text, true);
+  lv_obj_set_event_bubble(u.card_text, true);
+  lv_obj_set_scroll_elastic(u.card_text, false);  // clamp at both ends (lv_indev_scroll.c elastic_diff)
+  lv_obj_set_scroll_dir(u.card_text, LV_DIR_VER);
+  // Vertical only: text 348 > card content 344 (border counts), so a sideways drag chained up and slid the card.
+  lv_obj_set_scroll_chain_hor(u.card_text, false);
+  lv_obj_set_scrollable(u.card, false);
+  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_PRESSED, nullptr);
+  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_SCROLL, nullptr);
+  lv_obj_add_event_cb(u.card_text, on_card_text, LV_EVENT_RELEASED, nullptr);
+  lv_obj_center(u.card_text);
 }
 
 }  // namespace buddyui
