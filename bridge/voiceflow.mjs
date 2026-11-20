@@ -15,6 +15,8 @@
 //   typeIntoTty, typeIntoTmuxSession, tmuxHasSession, assistant (tmux session name)
 //   chat(text)            -> { text } | { why }: the built-in assistant when the tmux one isn't running
 //   answerPrompt(sid, promptId, decision), log
+import { find } from './router.mjs';
+
 export const ASK = 'Which session?', ASK_ARM_MS = 3000;  // the dial starts the re-listen well inside this
 
 export function createVoiceFlow(d) {
@@ -52,13 +54,12 @@ export function createVoiceFlow(d) {
       if (!text) return say(dial, { error: "Didn't catch that" });
       const sessions = d.sessionList(board);
       if (ask) {  // the answer to "Which session?": a name, then the original words go there
-        const key = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');  // router.mjs find(): exact, ignoring case and punctuation
-        const hit = sessions.filter((s) => key(s.name) === key(text));
-        if (hit.length !== 1) {
-          log(`voice: no session called "${text}" (${hit.length} matches), dropped`);
+        const hit = find(sessions, text);  // exact, ignoring case and punctuation
+        if (!hit) {
+          log(`voice: no single session called "${text}", dropped`);
           return say(dial, { error: `No session called ${text}` });
         }
-        return queueSend(dial, hit[0].id, ask.text, sessions, focusedId);
+        return queueSend(dial, hit.id, ask.text, sessions, focusedId);
       }
       const r = await d.route({ text, sessions, focusedId, env: d.routerEnv, timeoutMs: d.routerTimeoutMs });
       log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
@@ -108,8 +109,9 @@ export function createVoiceFlow(d) {
       return toAssistant(dial, text);
     }
     dial.pending = { run: () => typeSession(sid, text) };
-    log(`voice: confirm -> ${sessions.find((s) => s.id === sid)?.name || sid} (${text.length} chars)`);
-    say(dial, { final: sid === focusedId ? text : `${sessions.find((s) => s.id === sid)?.name || sid}: ${text}` });
+    const name = sessions.find((s) => s.id === sid)?.name || sid;
+    log(`voice: confirm -> ${name} (${text.length} chars)`);
+    say(dial, { final: sid === focusedId ? text : `${name}: ${text}` });
   }
 
   function typeSession(sid, text) {

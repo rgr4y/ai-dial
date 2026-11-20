@@ -36,7 +36,7 @@ export function sessionList(board, now = Date.now()) {
 }
 
 // Exact name ignoring case, spaces and punctuation ("auto ai" = "auto-ai"); ambiguous or unknown -> null.
-function find(sessions, name) {
+export function find(sessions, name) {
   const hit = sessions.filter((s) => squash(s.name) === squash(name));
   return hit.length === 1 ? hit[0] : null;
 }

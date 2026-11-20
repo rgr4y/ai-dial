@@ -214,7 +214,7 @@ test('ask: answer matches none -> "No session called X"', async () => {
   await m.hold('nothing');
   assert.deepEqual(m.t.said.at(-1), { error: 'No session called nothing' });
   assert.equal(m.dial.ask, null);
-  assert.ok(logs(m).includes('voice: no session called "nothing" (0 matches), dropped'));
+  assert.ok(logs(m).includes('voice: no single session called "nothing", dropped'));
 });
 test('ask: empty answer -> "Didn\'t catch that", question ended', async () => {
   const m = make();
