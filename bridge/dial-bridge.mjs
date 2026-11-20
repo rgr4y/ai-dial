@@ -8,6 +8,7 @@
 //   POST /event       any hook JSON; answers at once
 //   POST /permission  PermissionRequest hook JSON; held open until the dial answers -> {"decision":"allow"|"deny"},
 //                     or 204 when the dial is offline, the prompt was answered elsewhere, or it timed out.
+//   POST /speak       {"text"}: say it on the dial speaker (rules -> Wyoming TTS -> announcement); {"played":bool} when done
 //   GET  /status      daemon + dial state, for humans
 // HTTP on 0.0.0.0:${DIAL_ASSETS_PORT:-19877}, read-only: GET /<character>/<file> from bridge/assets (character packs
 // made by scripts/gen_buddy_pets.mjs). Heartbeats carry {"assets":{"url","rev"}}; the dial syncs LittleFS when rev
@@ -19,7 +20,7 @@
 // Config (env): DIAL_HOST (10.0.0.11, reserved on the router; e.g. "10.0.0.11,127.0.0.1"), DIAL_KEY (API encryption key; default: api_key from
 // DIAL_SECRETS, ~/workspace/esphome/secrets.yaml), DIAL_BRIDGE_PORT (19876), DIAL_PROMPT_TIMEOUT_S (280),
 // GROK_BOT_STORE (Grok Bot's store dir, watched read-only; skipped if absent), VOICE_STT_HOST / VOICE_STT_PORT
-// (Wyoming STT, 127.0.0.1:10300).
+// (Wyoming STT, 127.0.0.1:10300), VOICE_TTS_HOST / VOICE_TTS_PORT (Wyoming TTS, 127.0.0.1:10200).
 //
 // Voice: the dial's voice_assistant streams mic audio to this daemon (the API client that subscribed), which relays it
 // to a Wyoming STT server, sends the words back as {"evt":"voice"} lines and, when the dial says "send"
@@ -37,7 +38,7 @@ import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
 import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
 import { route, sessionList } from './router.mjs';
-import { cleanText, openStt, registerVoiceMessages, tmuxHasSession, typeIntoTmuxSession, typeIntoTty } from './voice.mjs';
+import { cleanText, openStt, registerVoiceMessages, stashTts, synthesize, tmuxHasSession, ttsFiles, typeIntoTmuxSession, typeIntoTty, wavMs } from './voice.mjs';
 
 const { Client, ServiceArgType } = esphome;
 const HOSTS = (process.env.DIAL_HOST || '10.0.0.11').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
@@ -46,6 +47,8 @@ const PROMPT_TIMEOUT_MS = Number(process.env.DIAL_PROMPT_TIMEOUT_S || 280) * 100
 const GROK_STORE = process.env.GROK_BOT_STORE || `${homedir()}/Library/Application Support/Grok Bot/sand-client-persistence`;
 const STT_HOST = process.env.VOICE_STT_HOST || '127.0.0.1';
 const STT_PORT = Number(process.env.VOICE_STT_PORT || 10300);
+const TTS_HOST = process.env.VOICE_TTS_HOST || '127.0.0.1';
+const TTS_PORT = Number(process.env.VOICE_TTS_PORT || 10200);
 const ROUTER_TIMEOUT_MS = Number(process.env.VOICE_ROUTER_TIMEOUT_MS || 3000);
 const ROUTER_ENV = { apiKey: process.env.ANTHROPIC_API_KEY, baseUrl: process.env.ANTHROPIC_BASE_URL };  // key from env only; none = no model call
 const ASSISTANT = process.env.VOICE_ASSISTANT_SESSION || 'voice';  // tmux session running the voice assistant Claude (make voice)
@@ -67,7 +70,7 @@ const waiters = new Map(); // prompt id -> resolve(decision | null)
 // ---- dial links ----
 // One per host: { host, client, keys, ready, ui }.
 const dials = HOSTS.map((host) => ({ host, client: null, lineKey: null, tapKey: null, decisionKey: null, uiKey: null,
-                                     ready: false, ui: null, lastErr: null, stt: null, pending: null }));
+                                     ready: false, ui: null, lastErr: null, stt: null, pending: null, playerKey: null, playerState: null, onPlayer: null }));
 const anyReady = () => dials.some((d) => d.ready);
 
 function connectDial(dial) {
@@ -91,6 +94,12 @@ function connectDial(dial) {
     // Match on name too: recent ESPHome leaves object_id empty in ListEntities.
     if (m.objectId === 'buddy_decision' || m.name === 'Buddy Decision') dial.decisionKey = m.key;
     if (m.objectId === 'buddy_ui' || m.name === 'Buddy UI') dial.uiKey = m.key;
+  });
+  client.connection.on('message.ListEntitiesMediaPlayerResponse', (m) => { dial.playerKey ??= m.key; });
+  client.connection.on('message.MediaPlayerStateResponse', (m) => {
+    if (m.key !== dial.playerKey) return;
+    dial.playerState = m.state;
+    dial.onPlayer?.(m.state);
   });
   client.connection.on('message.TextSensorStateResponse', (m) => {
     if (m.key === dial.uiKey && m.state) {
@@ -128,6 +137,8 @@ function connectDial(dial) {
     if (dial.ready) log(`dial disconnected (${dial.host})`);
     dial.ready = false;
     dial.ui = null;
+    dial.playerState = null;
+    dial.onPlayer?.(null);
     dial.stt?.abort();
     dial.stt = dial.pending = null;
     onUiForUsage();
@@ -213,12 +224,54 @@ function voiceStop(dial) {
       dial.pending = { run: () => answerPrompt(r.sid, p?.id, r.decision) };
       return say(dial, { final: `${r.decision === 'allow' ? 'Allow' : 'Deny'} ${name(r.sid)}: ${p?.tool || 'prompt'}` });
     }
-    dial.pending = { run: () => {} };  // speak: the card text is the reply (no speaker playback yet)
+    dial.pending = { run: () => speak(dial, r.text).catch((e) => log('voice: speak failed:', e.message)) };  // the card shows the reply; "send" also says it
     say(dial, { final: r.text });
   }).catch((e) => {
     log('voice: failed:', e.message);
     say(dial, { error: 'Speech service offline' });
   });
+}
+// ---- speaking on the dial ----
+// text -> claude-speak rules -> Wyoming TTS (WAV) -> served at tts/<id>.wav on the assets port -> media_player
+// announcement (media_url + announcement) on the dial; the firmware's on_announcement turns the amp on, on_idle off.
+// Resolves true when the dial reported announcing and then left it (playback done: qr8 re-arms the mic on that), false
+// when there was nothing to say, no dial, or the dial never started / never finished (logged).
+const ANNOUNCING = pb.MediaPlayerState.MEDIA_PLAYER_STATE_ANNOUNCING;
+function waitPlayed(dial, ms) {
+  return new Promise((res) => {
+    let started = false;
+    const end = (ok) => { clearTimeout(startT); clearTimeout(endT); dial.onPlayer = null; res(ok); };
+    const startT = setTimeout(() => { if (!started) { log(`speak: ${dial.host} never started announcing`); end(false); } }, 5000);
+    const endT = setTimeout(() => { log(`speak: ${dial.host} announcement did not finish`); end(false); }, ms + 15000);
+    dial.onPlayer = (st) => {
+      if (st === null) end(false);  // disconnected
+      else if (st === ANNOUNCING) started = true;
+      else if (started) end(true);
+    };
+  });
+}
+async function speak(dial, text) {
+  dial ??= dials.find((d) => d.ready && d.playerKey != null);
+  const addr = dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, '');
+  if (!dial?.ready || dial.playerKey == null || !addr) return log('speak: no dial with a media player'), false;
+  const wav = await synthesize(text, { host: TTS_HOST, port: TTS_PORT });
+  if (!wav) return false;
+  const url = `http://${addr}:${ASSETS_PORT}/tts/${stashTts(wav)}.wav`;
+  const played = waitPlayed(dial, wavMs(wav));
+  const m = new pb.MediaPlayerCommandRequest();  // the library's MediaPlayer entity has no announcement flag; the message does
+  m.setKey(dial.playerKey);
+  m.setHasMediaUrl(true);
+  m.setMediaUrl(url);
+  m.setHasAnnouncement(true);
+  m.setAnnouncement(true);
+  try {
+    dial.client.connection.sendCommandMessage(m);
+  } catch (e) {
+    dial.onPlayer?.(null);
+    throw e;
+  }
+  log(`speak: ${wavMs(wav)} ms -> ${dial.host} ${url}`);
+  return played;
 }
 function typeSession(sid, text) {
   const tty = board.tty(sid);
@@ -352,6 +405,13 @@ function assetsLine(dial) {
   }
 }
 createServer((req, res) => {
+  const tts = req.method === 'GET' && new URL(req.url, 'http://x').pathname.match(/^\/tts\/([0-9a-f]{16})\.wav$/);
+  if (tts) {
+    const wav = ttsFiles.get(tts[1]);
+    if (!wav) return res.writeHead(404).end();
+    log('assets', req.socket.remoteAddress, `tts/${tts[1]}.wav`);
+    return res.writeHead(200, { 'content-length': wav.length, 'content-type': 'audio/wav' }).end(wav);
+  }
   const path = normalize(decodeURIComponent(new URL(req.url, 'http://x').pathname));
   const file = join(ASSETS_DIR, path);
   if (req.method !== 'GET' || !file.startsWith(ASSETS_DIR + sep)) return res.writeHead(404).end();
@@ -450,6 +510,11 @@ const server = createServer(async (req, res) => {
   }
   if (req.method !== 'POST') return res.writeHead(404).end();
   const ev = await body(req);
+  if (req.url === '/speak') {  // {"text": "..."}: say it on the first ready dial; answers {"played": bool} after playback ends
+    if (typeof ev?.text !== 'string') return res.writeHead(400).end();
+    const played = await speak(null, ev.text).catch((e) => (log('speak failed:', e.message), false));
+    return res.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ played }));
+  }
   if (req.url === '/permission') return onPermission(ev, res);
   if (req.url === '/event') {
     if (ev) onEvent(ev);

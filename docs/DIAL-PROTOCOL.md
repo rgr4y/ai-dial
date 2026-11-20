@@ -157,6 +157,13 @@ junk or timeout: types into `sid`, or goes to the assistant when `sid` is empty,
   partials. `wyoming-macos-stt` (the Python one under launchd now) sends only the final `transcript`: the card shows
   "…" while you speak.
 
+**Speaking (bridge → dial speaker).** Not a `buddy_line`: the bridge sends the ESPHome `MediaPlayerCommandRequest`
+(`media_url`, `announcement: true`) to the dial's media_player. Text → claude-speak rules → Wyoming `synthesize` on
+127.0.0.1:10200 (`audio-start`/`audio-chunk`*/`audio-stop`, 16 kHz s16 mono) → WAV at `http://<bridge ip>:19877/tts/<id>.wav`
+(in memory, 60 s). The dial's announcement pipeline is WAV; its `on_announcement` / `on_idle` switch the amp. Done =
+media_player state `ANNOUNCING` then anything else. `POST 127.0.0.1:19876/speak {"text"}` triggers it by hand and answers
+`{"played":bool}` when playback ends. A router `speak` reply is said when the dial sends `send` (after the 2 s confirm).
+
 ## 6. Simulator
 
 There is no separate protocol: `claude-buddy-sim.yaml` runs the dial's own firmware UI on the Mac (ESPHome `host`,

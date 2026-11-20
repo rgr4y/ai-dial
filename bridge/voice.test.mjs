@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import net from 'node:net';
 import { test } from 'node:test';
-import { cleanText, Decoder, encode, openStt, registerVoiceMessages, typeIntoTty } from './voice.mjs';
+import { applySpeakRules, cleanText, Decoder, encode, loadRules, openStt, registerVoiceMessages, stashTts, synthesize, ttsFiles, typeIntoTty, wavMs } from './voice.mjs';
 
 test('encode / decode round trip, split across chunks', () => {
   const pcm = Buffer.from([1, 2, 3, 4]);
@@ -68,4 +68,83 @@ test('typing refuses a bad tty or empty text without touching iTerm', async () =
   assert.equal(await typeIntoTty('../x', 'hi'), false);
   assert.equal(await typeIntoTty('ttys003', '  \n '), false);
   assert.equal(cleanText(' a\nb\t c '), 'a b c');
+});
+
+// ---- speaking ----
+// A fake Wyoming TTS: on synthesize it answers audio-start, two audio-chunks of `n` samples each (a ramp), audio-stop.
+async function fakeTts({ rate = 16000, channels = 1, n = 800, width = 2, silent = false } = {}) {
+  const asked = [];
+  const srv = net.createServer((c) => {
+    const d = new Decoder();
+    c.on('error', () => {});
+    c.on('data', (b) => {
+      for (const e of d.push(b)) {
+        if (e.type !== 'synthesize') continue;
+        asked.push(e.data.text);
+        if (silent) return;
+        const fmt = { rate, width, channels };
+        const pcm = Buffer.alloc(n * channels * 2);
+        for (let i = 0; i < n * channels; i++) pcm.writeInt16LE(i % 100, i * 2);
+        c.write(Buffer.concat([encode('audio-start', fmt), encode('audio-chunk', fmt, pcm), encode('audio-chunk', fmt, pcm), encode('audio-stop')]));
+      }
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  return { srv, asked, port: srv.address().port };
+}
+
+test('synthesize: collects the chunks into a 16 kHz mono WAV; rules run before the server sees the text', async () => {
+  const { srv, asked, port } = await fakeTts();
+  const wav = await synthesize('Run `npm test` in the api dir', { port, rules: loadRules() });
+  assert.deepEqual(asked, ['Run N P M test in the A P I dir']);
+  assert.equal(wav.subarray(0, 4).toString(), 'RIFF');
+  assert.equal(wav.readUInt32LE(24), 16000);
+  assert.equal(wav.readUInt16LE(22), 1);
+  assert.equal(wav.readUInt16LE(34), 16);
+  assert.equal(wav.length, 44 + 800 * 2 * 2);
+  assert.equal(wavMs(wav), 100);
+  srv.close();
+});
+
+test('synthesize: resamples and downmixes a server that sends another format', async () => {
+  const { srv, port } = await fakeTts({ rate: 22050, channels: 2, n: 2205 });
+  const wav = await synthesize('hello', { port, rules: [] });
+  assert.equal(wav.readUInt32LE(24), 16000);
+  assert.equal(wav.length, 44 + Math.floor((2205 * 2 * 16000) / 22050) * 2);  // 2 chunks, mono, 16 kHz
+  srv.close();
+});
+
+test('synthesize: unspeakable text is null without a connection; 24-bit audio, silence and refusal reject', async () => {
+  assert.equal(await synthesize(' ... ', { port: 1, rules: loadRules() }), null);
+  const w = await fakeTts({ width: 3 });
+  await assert.rejects(synthesize('hi', { port: w.port, rules: [] }), /width/);
+  w.srv.close();
+  const s = await fakeTts({ silent: true });
+  await assert.rejects(synthesize('hi', { port: s.port, rules: [], timeoutMs: 100 }), /timeout/);
+  s.srv.close();
+  await assert.rejects(synthesize('hi', { port: 1, rules: [] }));
+});
+
+test('speak rules: claude-speak filter behaviour', () => {
+  const r = loadRules();
+  assert.ok(r.length > 20, 'claude-speak speak-rules.json found');
+  assert.equal(applySpeakRules('See https://x.dev/a and `foo_bar.py` now', r), 'See https:/x dot dev a and foo bar dot py now');
+  assert.equal(applySpeakRules('Which session? esphome on 4 GB', r), 'Which session? E S P Home on 4 gigabytes');
+  assert.equal(applySpeakRules('# Title\n', [{ type: 'replace_re', pattern: '^#{1,6}\\s+', replacement: '' }]), 'Title');
+  assert.equal(applySpeakRules('a-b', [{ type: 'replace_re', pattern: '(a)-(b)', replacement: '\\2 \\1' }]), 'b a');
+});
+
+test('tts files are served from the stash and expire', async () => {
+  const id = stashTts(Buffer.from('x'), 20);
+  assert.ok(ttsFiles.has(id));
+  await new Promise((r) => setTimeout(r, 60));
+  assert.ok(!ttsFiles.has(id));
+});
+
+test('media player announcement message serialises', () => {
+  const pb = registerVoiceMessages();
+  const m = new pb.MediaPlayerCommandRequest();
+  m.setKey(7); m.setHasMediaUrl(true); m.setMediaUrl('http://10.0.0.2:19877/tts/ab.wav'); m.setHasAnnouncement(true); m.setAnnouncement(true);
+  assert.ok(m.serializeBinary().length > 10);
+  assert.equal(pb.MediaPlayerState.MEDIA_PLAYER_STATE_ANNOUNCING, 4);
 });

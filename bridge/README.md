@@ -62,7 +62,15 @@ re-routed. A failed call, an HTTP error, junk, or no answer within `VOICE_ROUTER
 (`voice: router fallback (...)`) and the text goes to the focused session, or to the assistant when nothing is on the face.
 The router can only pick sessions in the bridge's list; a name that matches none gets a spoken question back. `focused`
 with nothing on the face shows "Which session? Say its name". Prompt answers wait out the same 2 s tap-to-cancel as typing.
-Replies show on the card only; no speaker playback yet.
+A `speak` reply is also said on the dial speaker once it is sent (see Speaking).
+
+**Speaking.** `speak(dial, text)` in `dial-bridge.mjs`: text goes through the claude-speak rules (`speak-rules.json`,
+`~/.config/claude-speak/` first, else `~/workspace/claude-speak/`; only its filter is reused, none of its servers), then a
+Wyoming `synthesize` to the say server (`VOICE_TTS_HOST` / `VOICE_TTS_PORT`, 127.0.0.1:10200; it answers 16 kHz 16-bit
+mono, anything else is resampled / downmixed). The WAV is served at `http://<bridge ip>:19877/tts/<id>.wav` (deleted after
+60 s) and the dial gets a `MediaPlayerCommandRequest` with `media_url` + `announcement`; the firmware's `on_announcement`
+turns the amp on and `on_idle` off. The promise resolves true when the dial's media_player went announcing then left it
+(that is the "done" signal), false on timeout or no dial. Try it: `curl -d '{"text":"Which session?"}' 127.0.0.1:19876/speak`.
 
 In the sim there is no mic: holding the face fakes the words ("fix the failing test in auth module", one word per
 400 ms), and the final 0.7 s after release. Pin a session first (`make sim-panel`: "3 sessions" or "Reply card"), or
