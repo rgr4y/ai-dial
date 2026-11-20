@@ -222,6 +222,17 @@ media_player:
       speaker: media_resampler
       format: NONE  # every codec (the default, FLAC only, rejected MP3 with ESP_ERR_NOT_SUPPORTED)
       num_channels: 1  # the ES8311 is mono, so decode straight to mono
+    # Amp on only while something plays: left on while idle, the speaker picks up RF noise.
+    on_play:
+      - switch.turn_on: speaker_amp
+    on_announcement:
+      - switch.turn_on: speaker_amp
+    on_idle:
+      - switch.turn_off: speaker_amp
+    on_pause:
+      - switch.turn_off: speaker_amp
+    on_turn_off:
+      - switch.turn_off: speaker_amp
 
 number:
   - platform: template
@@ -258,5 +269,5 @@ switch:
     pin:
       number: GPIO46
       ignore_strapping_warning: true  # board wiring: amp enable
-    restore_mode: RESTORE_DEFAULT_ON
+    restore_mode: ALWAYS_OFF  # the media player turns it on to play (above)
 
