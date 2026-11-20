@@ -1410,19 +1410,17 @@ inline void tick(uint32_t now) {
     u.scene.tick(now);
     u.alert.tick(now);
   }
-  if (u.bat_shimmer && !u.asleep) {  // charging: side % shimmers green, same sweep as the working line
-    uint8_t ph = shimmer_phase(now);
-    if (ph != u.bat_phase) {
-      u.bat_phase = ph;
-      shimmer_paint(u.bat_arc, u.bat_txt, LIVE, ph);
-    }
-  }
-  if (u.shimmer && !u.asleep) {
-    uint8_t ph = shimmer_phase(now);
-    if (ph != u.shimmer_phase) {
-      u.shimmer_phase = ph;
-      shimmer_paint(u.status_arc, u.arc_txt[1], u.arc_col[1], ph);
-    }
+  // Repaint a shimmering arc only when its sweep phase has moved; neither runs while asleep.
+  auto shimmer = [now](bool on, uint8_t &ph, lv_obj_t *a, const std::string &t, uint32_t c) {
+    if (!on) return;
+    uint8_t p = shimmer_phase(now);
+    if (p == ph) return;
+    ph = p;
+    shimmer_paint(a, t, c, p);
+  };
+  if (!u.asleep) {
+    shimmer(u.bat_shimmer, u.bat_phase, u.bat_arc, u.bat_txt, LIVE);  // charging: side % shimmers green, same sweep as the working line
+    shimmer(u.shimmer, u.shimmer_phase, u.status_arc, u.arc_txt[1], u.arc_col[1]);
   }
   if (!u.asleep && !lv_obj_is_hidden(u.alarm)) {
     // Bounce in, pulse twice a second, bounce out, across the 3 s usage flash. 256 = 1x.
