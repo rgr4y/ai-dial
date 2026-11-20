@@ -51,6 +51,14 @@ cancel) the bridge types it plus Return into the iTerm tab of the session the di
 `hook.sh` records). Details and limits: docs/DIAL-PROTOCOL.md section 5. First run: macOS asks to let the bridge
 control iTerm (Automation); the bridge runs under launchd, so approve it for that process. Only `voice.mjs` touches iTerm.
 
+**Router.** With `ANTHROPIC_API_KEY` in the bridge's environment (never in a file), each final transcript first goes to
+`claude-haiku-5-5` (`router.mjs`) with the session list. It picks one of: type into a named session, answer an open
+permission prompt (allow/deny), or reply on the card (status questions, "which one?"). Nothing named = the focused
+session. No key, an API error, a refusal or no answer within `VOICE_ROUTER_TIMEOUT_MS` (3000) is logged
+(`voice: router fallback (...)`) and the text goes to the focused session as before. The model can only pick sessions
+in the bridge's list; a name that matches none gets a spoken question back. Prompt answers wait out the same 2 s
+tap-to-cancel as typing. Replies show on the card only; no speaker playback yet.
+
 In the sim there is no mic: holding the face fakes the words ("fix the failing test in auth module", one word per
 400 ms), and the final 0.7 s after release. Pin a session first (`make sim-panel`: "3 sessions" or "Reply card"), or
 the hold says "No session to talk to". The fake final never reaches iTerm: the bridge ignores a `send` it has no text for.

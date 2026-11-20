@@ -134,6 +134,12 @@ dial   ui {voice:"confirm"}                              final text on the card 
 dial   ui {voice:"send"} (or voice gone = cancelled)     bridge types text + Return into the session's iTerm tab
 ```
 
+**Router.** Between audio-stop and `final`, the bridge may ask a small Claude (`bridge/router.mjs`, needs
+`ANTHROPIC_API_KEY`, 3 s limit) where the words go. The `final` line then carries what will happen on `send`: the text
+(focused session), `name: text` (another session), `Allow|Deny name: Tool` (answers that session's open prompt via the
+held PermissionRequest), or the router's spoken reply (nothing happens on `send`). No wire change: the dial still only
+sees `final`. No key, API error or timeout: behaves as without the router (types into `sid`), with a log line.
+
 - Lines carry one of `text` (partial), `final` (the transcript; empty = nothing heard) or `error` (shown for 2 s).
 - The bridge only types text it produced itself for that dial (`final`), into the terminal of `sid`
   (`Board.tty(sid)`, from `hook.sh`'s `tty`, matched to an iTerm session's `tty` by AppleScript). No tty for the session:

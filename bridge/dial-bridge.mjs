@@ -23,7 +23,9 @@
 //
 // Voice: the dial's voice_assistant streams mic audio to this daemon (the API client that subscribed), which relays it
 // to a Wyoming STT server, sends the words back as {"evt":"voice"} lines and, when the dial says "send"
-// (buddy_ui voice), types the text into the iTerm session of the dial's sid. See docs/DIAL-PROTOCOL.md "Voice".
+// (buddy_ui voice), types the text into the iTerm session of the dial's sid. With ANTHROPIC_API_KEY set, router.mjs
+// (Haiku) first decides: a named session, a prompt answer, or a spoken reply. See docs/DIAL-PROTOCOL.md "Voice".
+// VOICE_ROUTER_TIMEOUT_MS (3000).
 
 import { execFile } from 'node:child_process';
 import { closeSync, createReadStream, existsSync, openSync, readdirSync, readFileSync, readSync, statSync, watch } from 'node:fs';
@@ -33,6 +35,8 @@ import { join, normalize, sep } from 'node:path';
 import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
 import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
+import Anthropic from '@anthropic-ai/sdk';
+import { route, sessionList } from './router.mjs';
 import { cleanText, openStt, registerVoiceMessages, typeIntoTty } from './voice.mjs';
 
 const { Client, ServiceArgType } = esphome;
@@ -42,6 +46,8 @@ const PROMPT_TIMEOUT_MS = Number(process.env.DIAL_PROMPT_TIMEOUT_S || 280) * 100
 const GROK_STORE = process.env.GROK_BOT_STORE || `${homedir()}/Library/Application Support/Grok Bot/sand-client-persistence`;
 const STT_HOST = process.env.VOICE_STT_HOST || '127.0.0.1';
 const STT_PORT = Number(process.env.VOICE_STT_PORT || 10300);
+const ROUTER_TIMEOUT_MS = Number(process.env.VOICE_ROUTER_TIMEOUT_MS || 3000);
+const router = process.env.ANTHROPIC_API_KEY ? new Anthropic() : null;  // key from env only; none = type into the focused session
 const pb = registerVoiceMessages();  // before any connection: the API library lacks the voice message ids
 const KEEPALIVE_MS = 10000; // the dial treats 30 s of silence as gone
 
@@ -175,33 +181,55 @@ function voiceStop(dial) {
   const stt = dial.stt;
   dial.stt = null;
   if (!stt) return;
-  stt.finish().then((raw) => {
-    const text = cleanText(raw), sid = dial.ui?.sid;
+  stt.finish().then(async (raw) => {
+    const text = cleanText(raw), focusedId = dial.ui?.sid;
     if (!text) return say(dial, { error: "Didn't catch that" });
-    if (!sid || !board.tty(sid)) {
-      log(`voice: no terminal known for session ${sid || '(none)'}, dropped`);
-      return say(dial, { error: 'No terminal for that session' });
+    const sessions = sessionList(board);
+    const r = await route({ text, sessions, focusedId, client: router, timeoutMs: ROUTER_TIMEOUT_MS });
+    log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
+    const name = (sid) => sessions.find((s) => s.id === sid)?.name || sid;
+    if (r.action === 'send') {
+      if (!r.sid || !board.tty(r.sid)) {
+        log(`voice: no terminal known for session ${r.sid || '(none)'}, dropped`);
+        return say(dial, { error: 'No terminal for that session' });
+      }
+      dial.pending = { run: () => typeSession(r.sid, r.text) };
+      return say(dial, { final: r.sid === focusedId ? r.text : `${name(r.sid)}: ${r.text}` });
     }
-    dial.pending = { text, sid };
-    say(dial, { final: text });
-  }, (e) => {
-    log('voice: stt failed:', e.message);
+    if (r.action === 'answer') {
+      const p = board.sessions.get(r.sid)?.prompt;
+      dial.pending = { run: () => answerPrompt(r.sid, p?.id, r.decision) };
+      return say(dial, { final: `${r.decision === 'allow' ? 'Allow' : 'Deny'} ${name(r.sid)}: ${p?.tool || 'prompt'}` });
+    }
+    dial.pending = { run: () => {} };  // speak: the card text is the reply (no speaker playback yet)
+    say(dial, { final: r.text });
+  }).catch((e) => {
+    log('voice: failed:', e.message);
     say(dial, { error: 'Speech service offline' });
   });
 }
-// Dial state: "send" releases the text; leaving wait / confirm any other way (tap to cancel, timeout) drops it.
+function typeSession(sid, text) {
+  const tty = board.tty(sid);
+  if (!tty) return log(`voice: no terminal known for session ${sid}, dropped`);
+  typeIntoTty(tty, text).then(
+    (ok) => log(ok ? `voice: typed ${text.length} chars into ${tty}` : `voice: no iTerm session on ${tty}, dropped`),
+    (e) => log('voice: osascript failed:', e.message));
+}
+// Only if that very prompt is still open (answered in the terminal during the 2 s confirm = nothing to do).
+function answerPrompt(sid, promptId, decision) {
+  const w = promptId && board.sessions.get(sid)?.prompt?.id === promptId && waiters.get(promptId);
+  if (!w) return log(`voice: prompt for ${sid} is gone, ${decision} dropped`);
+  log(`voice: ${decision} prompt ${promptId}`);
+  w(decision);
+}
+// Dial state: "send" runs the pending action; leaving wait / confirm any other way (tap to cancel, timeout) drops it.
 // A "send" with nothing pending (the simulator's fake words) is ignored.
 function onUiForVoice(dial) {
   const v = dial.ui?.voice;
   if (v === 'wait' || v === 'confirm') return;
   const p = dial.pending;
   dial.pending = null;
-  if (v !== 'send' || !p) return;
-  const tty = board.tty(p.sid);
-  if (!tty) return log(`voice: no terminal known for session ${p.sid}, dropped`);
-  typeIntoTty(tty, p.text).then(
-    (ok) => log(ok ? `voice: typed ${p.text.length} chars into ${tty}` : `voice: no iTerm session on ${tty}, dropped`),
-    (e) => log('voice: osascript failed:', e.message));
+  if (v === 'send') p?.run();
 }
 
 // ---- plan usage ----
