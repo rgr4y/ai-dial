@@ -17,7 +17,7 @@
 //
 // Several dials can be driven at once (the dial and the desktop sim, claude-buddy-sim.yaml): DIAL_HOST is a comma list;
 // all get the same heartbeats, the first to answer a prompt wins.
-// Config (env): DIAL_HOST (10.0.0.11, reserved on the router; e.g. "10.0.0.11,127.0.0.1"), DIAL_KEY (API encryption key; default: api_key from
+// Config (env): DIAL_HOST (10.0.1.46, static in claude-buddy.yaml; e.g. "10.0.1.46,127.0.0.1"), DIAL_KEY (API encryption key; default: api_key from
 // DIAL_SECRETS, ~/workspace/esphome/secrets.yaml), DIAL_BRIDGE_PORT (19876), DIAL_PROMPT_TIMEOUT_S (280),
 // GROK_BOT_STORE (Grok Bot's store dir, watched read-only; skipped if absent), VOICE_STT_HOST / VOICE_STT_PORT
 // (Wyoming STT, 127.0.0.1:10300), VOICE_TTS_HOST / VOICE_TTS_PORT (Wyoming TTS, 127.0.0.1:10200).
@@ -41,7 +41,7 @@ import { route, sessionList } from './router.mjs';
 import { cleanText, openStt, registerVoiceMessages, stashTts, synthesize, tmuxHasSession, ttsFiles, typeIntoTmuxSession, typeIntoTty, wavMs } from './voice.mjs';
 
 const { Client, ServiceArgType } = esphome;
-const HOSTS = (process.env.DIAL_HOST || '10.0.0.11').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
+const HOSTS = (process.env.DIAL_HOST || '10.0.1.46').split(',').map((h) => h.trim()).filter(Boolean);  // IPs skip mDNS
 const PORT = Number(process.env.DIAL_BRIDGE_PORT || 19876);
 const PROMPT_TIMEOUT_MS = Number(process.env.DIAL_PROMPT_TIMEOUT_S || 280) * 1000;
 const GROK_STORE = process.env.GROK_BOT_STORE || `${homedir()}/Library/Application Support/Grok Bot/sand-client-persistence`;

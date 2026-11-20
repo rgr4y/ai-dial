@@ -64,9 +64,9 @@ wifi:
   use_psram: true
   power_save_mode: light  # battery: modem sleeps between beacons; API latency goes up slightly
   fast_connect: true  # saved BSSID + channel, no scan: Wi-Fi in ~1-2 s instead of ~7 s (other networks still cycled)
-  # Static, no DHCP wait. 10.0.0.11 is also reserved on the router (MAC 80:45:6B:34:26:3C) so nothing else takes it.
+  # Static, no DHCP wait. 10.0.1.46 should also be reserved on the router (MAC 80:45:6B:34:26:3C) so nothing else takes it.
   manual_ip:
-    static_ip: 10.0.0.11
+    static_ip: 10.0.1.46
     gateway: 10.0.1.1
     subnet: 255.255.254.0
     dns1: 10.0.1.1

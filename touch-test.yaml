@@ -1,7 +1,7 @@
 # Touch test for the dial: every finger the CST9220 reports is drawn as a numbered dot, with the count at the top.
 # Answers "does this panel do multitouch" (the ESPHome driver reads up to 5 points). Same board package as the
 # Buddy, no UI: flash it, test, then flash claude-buddy.yaml back.
-#   esphome run touch-test.yaml --device 10.0.0.11
+#   esphome run touch-test.yaml --device 10.0.1.46
 # Logs each update too: "touch: n=2 #0 (233,120) r=113 #1 (180,300) r=85". The grey ring is the candidate
 # edge-rejection radius (edge_r): dots outside it draw faded. Holding hold_ms shows VOICE (press and hold point both
 # inside edge_r, the rule in bead v5o) or REJECTED.

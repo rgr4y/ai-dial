@@ -34,7 +34,7 @@ Status: `curl -s localhost:19876/status`.
 `../claude-buddy-sim.yaml` builds the dial's real UI (`../buddy-ui.yaml`: `buddy/ui.h`, LVGL, the `claude_buddy`
 component) for the Mac with ESPHome's `host` platform, drawing into an SDL window (`brew install sdl2-compat`).
 - **Run:** `make sim` from the repo root; it rebuilds and relaunches 2 s after UI or component sources change (`make flash` builds and OTAs the dial). The plist's
-  `DIAL_HOST=10.0.0.11,127.0.0.1` makes the daemon drive it alongside the dial, so it shows the same live state.
+  `DIAL_HOST=10.0.1.46,127.0.0.1` makes the daemon drive it alongside the dial, so it shows the same live state.
 - **Input:** the mouse is touch. PWR and BOOT: click the keys on the case edge (placed as on the real dial), or press `p` / `b`. The window shows the 466 px glass inside the case at true scale.
 - **Pets:** read straight from `assets/` (no LittleFS, no sync); restart the sim after regenerating.
 - **Pin a scenario:** while `../build/sim-pin.jsonl` exists, the sim ignores the bridge and plays that file: one
