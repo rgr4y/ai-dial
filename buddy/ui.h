@@ -215,6 +215,15 @@ inline void show(lv_obj_t *o, bool on) {
 inline void set_text(lv_obj_t *l, const char *t) {
   if (strcmp(lv_label_get_text(l), t) != 0) lv_label_set_text(l, t);
 }
+// Full-screen page container: bare, W x W; optionally lets gestures bubble to root and/or starts hidden.
+inline lv_obj_t *mk_page(lv_obj_t *parent, bool bubble, bool hidden) {
+  lv_obj_t *p = lv_obj_create(parent);
+  lv_obj_remove_style_all(p);
+  lv_obj_set_size(p, scene::W, scene::W);
+  if (bubble) lv_obj_set_event_bubble(p, true);
+  if (hidden) lv_obj_set_hidden(p, true);
+  return p;
+}
 inline lv_obj_t *mk_card(lv_obj_t *parent) {
   // Recap card: radius 24, fill 0x1c1e26, rim 0x3d3f47 (focus.c:879-885). Harness x 41 w 384 clipped the round
   // glass at 4 lines (bottom corners at r ~234) and touched the face-side battery %: x 49 w 368 keeps r <= 228.
@@ -725,10 +734,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   show(u.alarm, false);
 
   // Permission (new; STOP layout, spec §2.8): question title, hint card, [deny] [allow].
-  u.perm = lv_obj_create(root);
-  lv_obj_remove_style_all(u.perm);
-  lv_obj_set_size(u.perm, scene::W, scene::W);
-  lv_obj_set_event_bubble(u.perm, true);  // gestures reach root
+  u.perm = mk_page(root, true, false);  // gestures reach root
   lv_obj_set_scrollable(u.perm, false);
   u.perm_title = mk_label(u.perm, u.f.f30, NAME);
   lv_obj_set_width(u.perm_title, 330);
@@ -766,18 +772,10 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   }
 
   // Usage screen (BOOT): children made by build_usage().
-  u.usage = lv_obj_create(root);
-  lv_obj_remove_style_all(u.usage);
-  lv_obj_set_size(u.usage, scene::W, scene::W);
-  lv_obj_set_event_bubble(u.usage, true);
-  lv_obj_set_hidden(u.usage, true);
+  u.usage = mk_page(root, true, true);
 
   // Battery page (BOOT, after usage): ring + big %, values set in update().
-  u.battery_page = lv_obj_create(root);
-  lv_obj_remove_style_all(u.battery_page);
-  lv_obj_set_size(u.battery_page, scene::W, scene::W);
-  lv_obj_set_event_bubble(u.battery_page, true);
-  lv_obj_set_hidden(u.battery_page, true);
+  u.battery_page = mk_page(root, true, true);
   u.battery_ring = lv_arc_create(u.battery_page);
   lv_obj_set_size(u.battery_ring, 340, 340);  // outer radius 170: arc-label glyphs reach in to ~185
   lv_obj_center(u.battery_ring);
@@ -794,10 +792,7 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_center(u.battery_num);
 
   // OTA page: big % and a rect bar (like the usage bars), text on the arcs; values set by ota().
-  u.ota_page = lv_obj_create(root);
-  lv_obj_remove_style_all(u.ota_page);
-  lv_obj_set_size(u.ota_page, scene::W, scene::W);
-  lv_obj_set_hidden(u.ota_page, true);
+  u.ota_page = mk_page(root, false, true);
   u.ota_pct = mk_label(u.ota_page, u.f.f96b, TEXT);
   lv_label_set_text(u.ota_pct, "0%");
   lv_obj_align(u.ota_pct, LV_ALIGN_CENTER, 0, -30);
@@ -834,11 +829,8 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
   lv_obj_set_hidden(u.bat_bolt, true);
   // Shield last = topmost. Hidden while awake; while dark it takes the touch and only wakes the screen
   // (touch_habitat.c:133-138 swallows the wake contact the same way).
-  u.shield = lv_obj_create(root);
-  lv_obj_remove_style_all(u.shield);
-  lv_obj_set_size(u.shield, scene::W, scene::W);
+  u.shield = mk_page(root, false, true);
   lv_obj_set_clickable(u.shield, true);
-  lv_obj_set_hidden(u.shield, true);
   lv_obj_add_event_cb(u.shield, [](lv_event_t *) { activity(lv_tick_get()); }, LV_EVENT_PRESSED, nullptr);
 
   pick_hint();
