@@ -108,6 +108,7 @@ void ClaudeBuddy::feed_line(const std::string &line) {
       v.final = !doc["final"].isNull();
       v.text = v.final ? (doc["final"] | "") : (doc["text"] | "");
       v.error = doc["error"] | "";
+      v.ask = doc["ask"] | "";
       v.seq++;
       this->notify_();
       return;

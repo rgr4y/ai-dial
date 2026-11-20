@@ -70,7 +70,7 @@ const waiters = new Map(); // prompt id -> resolve(decision | null)
 // ---- dial links ----
 // One per host: { host, client, keys, ready, ui }.
 const dials = HOSTS.map((host) => ({ host, client: null, lineKey: null, tapKey: null, decisionKey: null, uiKey: null,
-                                     ready: false, ui: null, lastErr: null, stt: null, pending: null, playerKey: null, playerState: null, onPlayer: null }));
+                                     ready: false, ui: null, lastErr: null, stt: null, pending: null, ask: null, playerKey: null, playerState: null, onPlayer: null }));
 const anyReady = () => dials.some((d) => d.ready);
 
 function connectDial(dial) {
@@ -140,7 +140,7 @@ function connectDial(dial) {
     dial.playerState = null;
     dial.onPlayer?.(null);
     dial.stt?.abort();
-    dial.stt = dial.pending = null;
+    dial.stt = dial.pending = dial.ask = null;
     onUiForUsage();
   });
   client.on('error', (e) => {
@@ -178,6 +178,7 @@ const say = (dial, o) => sendLine({ evt: 'voice', ...o }, dial);
 function voiceStart(dial) {
   dial.stt?.abort();
   dial.pending = null;
+  if (!dial.ask?.armed) dial.ask = null;  // a new hold drops a question; the re-listen it armed is not one
   const res = new pb.VoiceAssistantResponse();  // port 0: audio comes over the API connection
   res.setPort(0);
   res.setError(false);
@@ -195,19 +196,25 @@ function voiceStop(dial) {
   if (!stt) return;
   stt.finish().then(async (raw) => {
     const text = cleanText(raw), focusedId = dial.ui?.sid;
+    const ask = dial.ask;
+    dial.ask = null;  // any outcome ends the question
     if (!text) return say(dial, { error: "Didn't catch that" });
     const sessions = sessionList(board);
+    if (ask) {  // the answer to "Which session?": a name, then the original words go there
+      const key = (s) => String(s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, '');  // router.mjs find(): exact, ignoring case and punctuation
+      const hit = sessions.filter((s) => key(s.name) === key(text));
+      if (hit.length !== 1) {
+        log(`voice: no session called "${text}" (${hit.length} matches), dropped`);
+        return say(dial, { error: `No session called ${text}` });
+      }
+      return queueSend(dial, hit[0].id, ask.text, sessions, focusedId);
+    }
     const r = await route({ text, sessions, focusedId, env: ROUTER_ENV, timeoutMs: ROUTER_TIMEOUT_MS });
     log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
     const name = (sid) => sessions.find((s) => s.id === sid)?.name || sid;
     if (r.action === 'send') {
-      if (!r.sid) return say(dial, { error: 'Which session? Say its name' });  // nothing on the face, none named
-      if (!board.tty(r.sid)) {
-        log(`voice: no terminal known for session ${r.sid || '(none)'}, dropped`);
-        return say(dial, { error: 'No terminal for that session' });
-      }
-      dial.pending = { run: () => typeSession(r.sid, r.text) };
-      return say(dial, { final: r.sid === focusedId ? r.text : `${name(r.sid)}: ${r.text}` });
+      if (!r.sid) return askSession(dial, r.text);  // nothing on the face, none named
+      return queueSend(dial, r.sid, r.text, sessions, focusedId);
     }
     if (r.action === 'assistant') {
       if (!(await tmuxHasSession(ASSISTANT))) {
@@ -231,9 +238,30 @@ function voiceStop(dial) {
     say(dial, { error: 'Speech service offline' });
   });
 }
+// Type text into a session once the confirm card runs out.
+function queueSend(dial, sid, text, sessions, focusedId) {
+  if (!board.tty(sid)) {
+    log(`voice: no terminal known for session ${sid}, dropped`);
+    return say(dial, { error: 'No terminal for that session' });
+  }
+  dial.pending = { run: () => typeSession(sid, text) };
+  say(dial, { final: sid === focusedId ? text : `${sessions.find((s) => s.id === sid)?.name || sid}: ${text}` });
+}
+// No session to send to: say "Which session?", and only once it has finished playing (or failed) tell the dial to listen
+// again, so the mic does not hear the question. dial.ask holds the original text until the answer, a new hold, or an
+// empty / unmatched answer; `armed` marks the re-listen's own voiceStart as not a new hold.
+const ASK = 'Which session?';
+function askSession(dial, text) {
+  const ask = dial.ask = { text, armed: false };
+  speak(dial, ASK).catch((e) => log('voice: ask speak failed:', e.message)).then(() => {
+    if (dial.ask !== ask || !dial.ready) return;  // a new hold took over
+    ask.armed = true;
+    say(dial, { ask: ASK });
+  });
+}
 // ---- speaking on the dial ----
 // text -> claude-speak rules -> Wyoming TTS (WAV) -> served at tts/<id>.wav on the assets port -> media_player
-// announcement (media_url + announcement) on the dial; the firmware's on_announcement turns the amp on, on_idle off.
+// announcement (media_url + announcement) on the dial; the amp is always on, the silence loop keeps the DAC fed.
 // Resolves true when the dial reported announcing and then left it (playback done: qr8 re-arms the mic on that), false
 // when there was nothing to say, no dial, or the dial never started / never finished (logged).
 // The API reports an announcement as PLAYING, never ANNOUNCING (esphome api_connection.cpp try_send_media_player_state).

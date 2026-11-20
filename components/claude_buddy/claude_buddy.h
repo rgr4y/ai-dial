@@ -33,7 +33,7 @@ struct Notice {
 // The last {"evt":"voice"} line from the bridge: partial words (text), the final (final = true), or an error to show.
 // seq counts lines, so the UI can tell a new one from the same text twice.
 struct VoiceLine {
-  std::string text, error;
+  std::string text, error, ask;  // ask: the bridge's question; the dial speaks nothing, it listens again
   bool final = false;
   uint32_t seq = 0;
 };

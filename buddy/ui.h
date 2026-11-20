@@ -75,9 +75,11 @@ static constexpr uint32_t CARD_MANUAL_MS = 5000;
 static constexpr uint32_t CARD_SHORT_MS = 10000, REPLY_TO_BELL_MS = 120000;
 
 // Voice (hold the face): LISTEN while the finger is down, WAIT for the bridge's final text, CONFIRM shows it (a tap
-// cancels), SEND for one update (the bridge types it into the session), NOTE a short message. Protocol: DIAL-PROTOCOL.md.
+// cancels), SEND for one update (the bridge types it into the session), NOTE a short message. An "ask" line from the
+// bridge (it could not pick a session) shows the question and listens again with no hold, VOICE_ASK_MS or until a tap.
+// Protocol: DIAL-PROTOCOL.md.
 static constexpr uint32_t VOICE_CONFIRM_MS = 2000, VOICE_TAIL_MS = 300, VOICE_WAIT_MS = 10000, VOICE_NOTE_MS = 2000,
-                          VOICE_MAX_MS = 60000;  // tail: mic keeps running this long after release (buffered words)
+                          VOICE_MAX_MS = 60000, VOICE_ASK_MS = 4000;  // tail: mic keeps running this long after release (buffered words)
 enum class Voice : uint8_t { OFF, LISTEN, WAIT, CONFIRM, SEND, NOTE };
 static const char *const VOICE_NAMES[] = {"off", "listening", "wait", "confirm", "send", "note"};
 
@@ -113,6 +115,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   std::string voice_text, voice_sid;  // words on the card; the session they will be typed into (fixed at the hold)
   uint32_t voice_at = 0, voice_stop_at = 0, voice_seen = 0;  // state entered; when to stop the mic; bridge lines seen
   bool voice_stopped = true;
+  bool voice_ask = false;  // this LISTEN is the bridge's follow-up question: no finger, ends on a timer or a tap
   std::function<bool(bool)> on_voice;  // YAML: start (true) / stop (false) capture; start returns false if it can't
   lv_obj_t *usage = nullptr;  // usage screen: rebuilt from the snapshot's cards (build_usage)
   static constexpr int BURST_N = 18;
@@ -502,6 +505,14 @@ inline void boot(uint32_t now) {
 }
 
 // Remote tap (api action buddy_tap): the same effect as touching the glass.
+// Finger up (or, for an ask, the timer / a tap): keep the mic open for the tail, then wait for the final text.
+inline void end_listen(uint32_t now) {
+  Ui &u = ui();
+  u.voice = Voice::WAIT;
+  u.voice_ask = false;
+  u.voice_at = now;
+  u.voice_stop_at = now + VOICE_TAIL_MS;
+}
 // targets: allow, deny, later, card, bell, next, prev, back, wake, screen, boot
 inline void tap(const std::string &t) {
   Ui &u = ui();
@@ -513,6 +524,7 @@ inline void tap(const std::string &t) {
   if (was_asleep || t == "wake" || t == "screen") return update(now);  // a wake touch only wakes
   if (t == "card" && u.voice != Voice::OFF) {  // the hold's own release lands as a card click: swallowed; in confirm it cancels
     if (u.voice == Voice::CONFIRM) u.voice = Voice::OFF;
+    if (u.voice == Voice::LISTEN && u.voice_ask) end_listen(now);  // a tap ends the follow-up listen
     return update(now);
   }
   if ((t == "allow" || t == "deny") && u.view == View::PERMISSION) {
@@ -588,6 +600,7 @@ inline void on_hold(lv_event_t *) {
   if (!inside(u.press_pt) || !inside(at)) return;  // a grip at the rim, not a hold on the face
   u.voice_sid = voice_target();
   u.voice_text.clear();
+  u.voice_ask = false;
   // No session on the face (idle, card dismissed) still listens: the bridge's router picks one by name, else asks.
   if (!u.on_voice || !u.on_voice(true)) {
     voice_note("Voice is offline", now);
@@ -999,7 +1012,15 @@ inline void update(uint32_t now) {
   const auto &vl = b->voice();
   if (vl.seq != u.voice_seen) {
     u.voice_seen = vl.seq;
-    if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
+    if (u.voice == Voice::WAIT && !vl.ask.empty()) {
+      u.voice_text = vl.ask;  // the question stays on the card while the mic re-arms
+      if (u.on_voice && u.on_voice(true)) {
+        u.voice = Voice::LISTEN;
+        u.voice_ask = true;
+        u.voice_at = now;
+        u.voice_stopped = false;
+      } else voice_note("Voice is offline", now);
+    } else if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
       u.voice_text = vl.text;
     } else if (u.voice == Voice::WAIT && !vl.error.empty()) {
       voice_note(vl.error.c_str(), now);
@@ -1448,10 +1469,9 @@ inline void tick(uint32_t now) {
     update(now);  // a turn that started while reading takes the face now
   }
   if (u.voice == Voice::LISTEN &&
-      (lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED || now - u.voice_at > VOICE_MAX_MS)) {
-    u.voice = Voice::WAIT;  // finger up: keep the mic open for the tail, then wait for the final text
-    u.voice_at = now;
-    u.voice_stop_at = now + VOICE_TAIL_MS;
+      (u.voice_ask ? now - u.voice_at > VOICE_ASK_MS
+                   : lv_indev_get_state(lv_indev_get_next(nullptr)) != LV_INDEV_STATE_PRESSED || now - u.voice_at > VOICE_MAX_MS)) {
+    end_listen(now);
     update(now);
   }
   if (u.voice == Voice::WAIT && now >= u.voice_stop_at) voice_stop_mic();

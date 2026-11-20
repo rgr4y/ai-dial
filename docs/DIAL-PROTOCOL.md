@@ -140,8 +140,16 @@ fast model through cli-proxy-api. The `final` line then carries what will happen
 `name: text` (another session), `Assistant: text` (typed into the tmux session `voice`, a Claude that can act on the Mac),
 `Allow|Deny name: Tool` (answers that session's open prompt via the held PermissionRequest), or the router's spoken reply
 (nothing happens on `send`). No wire change: the dial still only sees `final`, or `error` ("Assistant offline" when the
-`voice` tmux session is not running, "Which session? Say its name" when none is on the face and none is named). API error,
-junk or timeout: types into `sid`, or goes to the assistant when `sid` is empty, with a log line.
+`voice` tmux session is not running). API error, junk or timeout: types into `sid`, or goes to the assistant when `sid` is
+empty, with a log line.
+
+**Ask.** When the words must go to a session and none is on the face and none is named, the bridge keeps the text, speaks
+"Which session?" on the dial speaker (media_player announcement) and, only after playback has ended, sends
+`{"evt":"voice","ask":"Which session?"}`. The dial (in `wait`) shows the question on the card and listens again with no
+hold: `ui {voice:"listening"}` for 4 s (`VOICE_ASK_MS`) or until a tap, then the usual `wait`. The next `final` is matched
+as a session name (exact, ignoring case and punctuation, unique): a hit sends the original text there through the normal
+`confirm` card (`name: text`); a miss is `error` "No session called <answer>" and nothing is sent. The question is dropped
+on any outcome and by a new hold.
 
 - Lines carry one of `text` (partial), `final` (the transcript; empty = nothing heard) or `error` (shown for 2 s).
 - The bridge only types text it produced itself for that dial (`final`), into the terminal of `sid`
