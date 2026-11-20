@@ -27,7 +27,7 @@ test\:cpp:
 	@mkdir -p build
 	@for t in tests/test_*.cpp; do \
 	  b=build/$$(basename $$t .cpp); \
-	  c++ -std=c++17 -Wall -DSCENE_NO_LVGL -DCUBE_NO_LVGL $$t -o $$b && $$b || exit 1; \
+	  c++ -std=c++17 -Wall -DSCENE_NO_LVGL $$t -o $$b && $$b || exit 1; \
 	done
 
 test\:node:

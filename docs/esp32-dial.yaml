@@ -1,5 +1,6 @@
 # Waveshare ESP32-S3-Touch-AMOLED-1.75C (ex-Autonomous "Harness" dial). Base hardware config.
 # Pins verified against the Waveshare 1.75C schematic: see docs/PINMAP.md.
+# Reference only: cube.h and scripts/restream.sh, used below, were removed from the repo (see git history).
 # 1.75C vs the non-C 1.75 (and ESPHome's preset): LCD/touch reset on GPIO1/2 (not 39/40), MCLK GPIO16 (not 42), 32MB flash.
 #
 # secrets.yaml here is a symlink to ~/workspace/esphome/secrets.yaml.
