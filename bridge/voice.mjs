@@ -8,6 +8,7 @@
 
 import { execFile } from 'node:child_process';
 import { createRequire } from 'node:module';
+import { existsSync } from 'node:fs';
 import net from 'node:net';
 
 export function encode(type, data, payload) {
@@ -124,10 +125,30 @@ const SCRIPT = [
 
 export const cleanText = (s) => String(s ?? '').replace(/[\x00-\x1f\x7f]+/g, ' ').replace(/\s+/g, ' ').trim();
 
-// Resolves true when typed, false when no iTerm session has that tty. Rejects on osascript failure.
-export function typeIntoTty(tty, text) {
+// tmux: the session's tty is a pane, which iTerm never sees (it only knows the tmux client's tty). send-keys -l types
+// the text literally; Enter goes separately, after the same 0.3 s as the iTerm path. The bridge's launchd PATH lacks
+// Homebrew, hence the absolute paths.
+const TMUX = ['/opt/homebrew/bin/tmux', '/usr/local/bin/tmux'].find((p) => existsSync(p));
+const run = (cmd, args) => new Promise((res, rej) =>
+  execFile(cmd, args, { timeout: 5000 }, (e, out) => (e ? rej(e) : res(out))));
+
+async function tmuxPane(tty) {
+  if (!TMUX) return null;
+  const out = await run(TMUX, ['list-panes', '-a', '-F', '#{pane_tty} #{pane_id}']).catch(() => '');
+  return out.split('\n').map((l) => l.split(' ')).find(([t]) => t === `/dev/${tty}`)?.[1] ?? null;
+}
+
+// Resolves true when typed, false when no tmux pane or iTerm session has that tty. Rejects on tmux/osascript failure.
+export async function typeIntoTty(tty, text) {
   const msg = cleanText(text);
-  if (!/^ttys\d+$/.test(tty || '') || !msg) return Promise.resolve(false);
+  if (!/^ttys\d+$/.test(tty || '') || !/[\p{L}\p{N}]/u.test(msg)) return false;  // no words (STT heard only ".")
+  const pane = await tmuxPane(tty);
+  if (pane) {
+    await run(TMUX, ['send-keys', '-t', pane, '-l', msg]);
+    await new Promise((r) => setTimeout(r, 300));
+    await run(TMUX, ['send-keys', '-t', pane, 'Enter']);
+    return true;
+  }
   return new Promise((res, rej) => {
     execFile('osascript', SCRIPT.flatMap((l) => ['-e', l]).concat([tty, msg]), { timeout: 10000 },
              (e, out) => (e ? rej(e) : res(out.trim() === 'ok')));
