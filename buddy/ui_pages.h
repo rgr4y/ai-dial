@@ -164,10 +164,6 @@ inline void build_brand(lv_obj_t *root) {
   u.word = mk_label(root, u.f.f48b, TEXT);
   set_text(u.word, "Otto");
   lv_obj_align(u.word, LV_ALIGN_TOP_MID, 0, 262);
-  u.sub = mk_label(root, u.f.f25, SECONDARY);
-  lv_obj_set_width(u.sub, 340);
-  lv_label_set_long_mode(u.sub, LV_LABEL_LONG_MODE_WRAP);
-  lv_obj_align(u.sub, LV_ALIGN_TOP_MID, 0, 270);
 }
 
 inline void build_permission(lv_obj_t *root) {

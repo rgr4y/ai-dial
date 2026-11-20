@@ -32,7 +32,6 @@ inline void publish_state() {
   }
   if (vis(u.bell)) d["bell"] = lv_label_get_text(u.bell_text);
   if (vis(u.word)) d["word"] = lv_label_get_text(u.word);
-  if (vis(u.sub)) d["sub"] = lv_label_get_text(u.sub);
   if (vis(u.perm)) {
     JsonObject p = d["perm"].to<JsonObject>();
     p["title"] = lv_label_get_text(u.perm_title);

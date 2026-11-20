@@ -99,7 +99,7 @@ Each line is one Claude desktop Hardware Buddy JSON object
  "card":"api: All tests pass.",                     // recap card (Dismiss button above it)
  "bell":"2 waiting",                                // bell pill: "N waiting", "N new" (replies from other sessions)
  "dots":"2/3",                                      // page dots (more than one session working): focused / working
- "word":"Claude", "sub":"Waiting for the bridge",   // brand view
+ "word":"Claude",                                   // brand view
  "perm":{"title":"Allow Bash?","hint":"api: rm -rf /tmp/x","count":"1 of 2 waiting"},
  "voice":"listening|wait|confirm|send|note","sid":"s1",   // hold-to-talk (section 5): state, and the session it types into
  "alarm":"87%"}                                     // usage_pct >= 80 during the usage flash: red, pulsing, pet hidden

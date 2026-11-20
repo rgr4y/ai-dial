@@ -24,14 +24,14 @@ namespace buddyui {
 using esphome::claude_buddy::ClaudeBuddy;
 
 // ---- theme (spec §2 Common) ----
-static constexpr uint32_t TEXT = 0xefe7de, SECONDARY = 0xada6ad, ACCENT = 0xc6aaef, SELECTION = 0x392c4a,
+static constexpr uint32_t TEXT = 0xefe7de, SECONDARY = 0xada6ad,
                           ERROR = 0xe7a6ad, NAME = 0xeaeaf0, RECAP = 0xd6d6d2, CARD = 0x1c1e26, CARD_RIM = 0x3d3f47,
                           RELAX_LINE = 0x9a9aa6, LIVE = 0x00ff2f, BLUE = 0x006fff;
 // Buttons (mk_button): filled, so they don't read as cards. Fill / label per kind; pressed darkens the fill.
-// Primary: the default action (Dismiss). Warning: needs a second thought. Error: cancel, deny, destructive.
-enum class Btn { PRIMARY, WARNING, ERROR };
+// Primary: the default action (Dismiss). Error: cancel, deny, destructive.
+enum class Btn { PRIMARY, ERROR };
 struct BtnInk { uint32_t fill, text; };
-static constexpr BtnInk BTN_INK[] = {{0x7c5cc4, 0xffffff}, {0xd9902f, 0x1a1206}, {0xc94a5a, 0xffffff}};
+static constexpr BtnInk BTN_INK[] = {{0x7c5cc4, 0xffffff}, {0xc94a5a, 0xffffff}};
 
 // AI provider colours, picked to read on black. Brand-derived: Claude terracotta, Copilot the light end of the
 // Microsoft 365 blue, Codex OpenAI green. Grok's brand is black and white, so a cool silver that still differs
@@ -101,7 +101,7 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   uint32_t card_manual_at = 0;                      // last touch / scroll movement while manual
   uint32_t card_shown_at = 0, card_pass_ms = 0;     // card text last changed; its read time (one pass, or CARD_SHORT_MS)
   lv_obj_t *dismiss = nullptr, *card = nullptr, *card_text = nullptr, *bell = nullptr, *bell_text = nullptr;
-  lv_obj_t *word = nullptr, *sub = nullptr;                                  // brand (bridge offline)
+  lv_obj_t *word = nullptr;  // brand (bridge offline)
   lv_obj_t *perm = nullptr, *perm_title = nullptr, *perm_hint = nullptr, *perm_count = nullptr;
   lv_obj_t *btn_deny = nullptr, *btn_allow = nullptr;
   // Page dots (more than one working session): one per session, the focused one lit. Only DOTS_MAX are drawn.
@@ -173,15 +173,15 @@ inline void publish_state();
 // Visibility as a diff: views say what they show (vis.on), the guard applies it once on any return.
 struct Vis {
   Ui &u;
-  lv_obj_t *o[11];
-  bool want[11] = {};
-  explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.sub, ui_.perm, ui_.dots, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
+  lv_obj_t *o[10];
+  bool want[10] = {};
+  explicit Vis(Ui &ui_) : u(ui_), o{ui_.dismiss, ui_.card, ui_.bell, ui_.word, ui_.perm, ui_.dots, ui_.alarm, ui_.usage, ui_.battery_page, ui_.ota_page} {}
   void on(lv_obj_t *x) {
-    for (int i = 0; i < 11; i++)
+    for (int i = 0; i < 10; i++)
       if (o[i] == x) want[i] = true;
   }
   ~Vis() {
-    for (int i = 0; i < 11; i++) show(o[i], want[i]);
+    for (int i = 0; i < 10; i++) show(o[i], want[i]);
     publish_state();
   }
 };
