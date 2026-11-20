@@ -134,6 +134,8 @@ export const scenes = {
   work: { name: 'claude_work', w: 117, h: 117, dx: 1, dy: -4, steps: STEPS, step_ms: STEP_MS, layers, discs: 0, disc: null, count_at: null },
 };
 scaleScene(PET_SCALE, sets, layers, scenes.work);
+// IMU gaze (buddy/gaze.h): the eyes (layer 2) move up to x, y dial px; no scripted glance to take out.
+scenes.work.gaze = { layer: layers.findIndex((l) => l.set === 'work_eyes'), x: 6, y: 4, look: null };
 
 // ---- write ---------------------------------------------------------------------------------------------------
 if (process.argv[1] === fileURLToPath(import.meta.url)) {

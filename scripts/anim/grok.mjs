@@ -3,7 +3,7 @@
 //
 // Scene `grok_<shape>`: the body (white, tinted on the dial with the bot's colour: scene.tint names that layer)
 // bobs, and the eyes ride it, glance left and right, and blink. Native size (the shapes are ~120 px across at
-// 144, scaled by SCALE); the parts are vector, so a size change is SCALE.
+// 144, scaled by XL); the parts are vector, so a size change is XL.
 import { readdirSync, readFileSync } from 'node:fs';
 import { scaleScene } from './frames.mjs';
 import { dirname, join, resolve } from 'node:path';
@@ -12,7 +12,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const ART = join(ROOT, 'art/grok');
 const N = 144;
-const SCALE = 4 / 3;  // Rob: a third bigger than the app's 144 canvas
+const SCALE = 4 / 3;  // the old face size, where GAZE is measured
 
 // 20 fps: the dial steps scenes from a 50 ms interval (buddy-ui.yaml), so a shorter step only skips steps unevenly.
 const STEPS = 52, STEP_MS = 50;  // 2.6 s loop
@@ -20,6 +20,7 @@ const every = (f) => Array.from({ length: STEPS }, (_, s) => f(s));
 const BOB = every((s) => -3 * (1 - Math.cos((2 * Math.PI * s) / 26)) / 2);  // two bobs per loop, 0..-3; scaleScene rounds
 const LOOK = every((s) => (s >= 10 && s < 20 ? -3 : s >= 22 && s < 32 ? 3 : 0));        // glance left, then right
 const BLINK = every((s) => (s >= 42 && s < 45 ? 1 : 0));                                  // eyes frame: 0 open, 1 shut
+export const GAZE = { x: 20, y: 20 };  // IMU gaze reach in dial px (the scripted glance is 4)
 
 // A frame cropped to its content box (1 px margin for anti-aliasing), placed where that box sits on the 144 canvas.
 // Full-canvas frames cost 62 KB each decoded; the eyes alone are a tenth of that.
@@ -45,20 +46,33 @@ const shut = (eyes) => eyes.replace(/<rect x="([\d.]+)" y="([\d.]+)" width="([\d
 });
 
 export const sets = {}, scenes = {};
+// One scene per shape (`grok_<shape>`, XL): it fills the busy and idle face (the bots are all head).
+// Bodies and eyes are A8 (alpha only: the body tinted on the dial, the eyes drawn in their layer's `ink`): a third of
+// RGB565A8's PSRAM, which is what pays for XL.
+const EYE_INK = 0x111111;  // art/grok eyes fill
+export const XL = 2.3;  // face size, busy and idle: the bots are all head (also Copilot's head, scripts/anim/copilot.mjs)
+const SIZES = [['', XL]];
 for (const file of readdirSync(ART).filter((f) => f.endsWith('.svg')).sort()) {
   const shape = file.slice(0, -4), s = readFileSync(join(ART, file), 'utf8');
   const body = s.match(/<path id="body"[^>]*\/>/)[0], eyes = s.match(/<g id="eyes"[\s\S]*?<\/g>/)[0];
   const eyesShut = shut(eyes);
-  sets[`grok_${shape}_body`] = [frame(body, pathBox(body.match(/ d="([^"]*)"/)[1]))];
-  sets[`grok_${shape}_eyes`] = [frame(eyes, rectsBox(eyes)), frame(eyesShut, rectsBox(eyesShut))];
-  scenes[`grok_${shape}`] = {
-    name: `grok_${shape}`, w: N, h: N, dx: 0, dy: 0, steps: STEPS, step_ms: STEP_MS, tint: 0,
-    layers: [
-      { set: `grok_${shape}_body`, loop: every(() => 0), at: every((k) => [sets[`grok_${shape}_body`][0].at[0], sets[`grok_${shape}_body`][0].at[1] + BOB[k]]) },
-      { set: `grok_${shape}_eyes`, loop: BLINK, at: every((k) => { const a = sets[`grok_${shape}_eyes`][BLINK[k]].at; return [a[0] + LOOK[k], a[1] + BOB[k]]; }) },
-    ],
-    discs: 0, disc: null, count_at: null,
-  };
-  const own = { [`grok_${shape}_body`]: sets[`grok_${shape}_body`], [`grok_${shape}_eyes`]: sets[`grok_${shape}_eyes`] };
-  scaleScene(SCALE, own, scenes[`grok_${shape}`].layers, scenes[`grok_${shape}`]);
+  for (const [size, k] of SIZES) {
+    const name = `grok_${shape}${size}`, bs = `${name}_body`, es = `${name}_eyes`;
+    sets[bs] = [{ ...frame(body, pathBox(body.match(/ d="([^"]*)"/)[1])), a8: true }];
+    sets[es] = [{ ...frame(eyes, rectsBox(eyes)), a8: true }, { ...frame(eyesShut, rectsBox(eyesShut)), a8: true }];
+    scenes[name] = {
+      name, w: N, h: N, dx: 0, dy: 0, steps: STEPS, step_ms: STEP_MS, tint: 0,
+      layers: [
+        { set: bs, loop: every(() => 0), at: every((j) => [sets[bs][0].at[0], sets[bs][0].at[1] + BOB[j]]) },
+        { set: es, ink: EYE_INK, loop: BLINK, at: every((j) => { const a = sets[es][BLINK[j]].at; return [a[0] + LOOK[j], a[1] + BOB[j]]; }) },
+      ],
+      discs: 0, disc: null, count_at: null,
+    };
+    scaleScene(k, { [bs]: sets[bs], [es]: sets[es] }, scenes[name].layers, scenes[name]);
+    // IMU gaze (buddy/gaze.h): the eyes move up to GAZE px (at SCALE; XL scales it); look = the scaled glance,
+    // taken out while the IMU steers.
+    const eyesAt = scenes[name].layers[1].at, still = every((j) => sets[es][BLINK[j]].at), g = k / SCALE;
+    scenes[name].gaze = { layer: 1, x: Math.round(GAZE.x * g), y: Math.round(GAZE.y * g),
+                          look: eyesAt.map(([x], j) => x - Math.round(still[j][0] * k)) };
+  }
 }

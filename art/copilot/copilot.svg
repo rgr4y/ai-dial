@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="1200" viewBox="0 0 1200 1200">
+  <!-- GitHub Copilot's helmet head, redrawn flat after its logo for the dial (scripts/anim/copilot.mjs).
+       Parts by id: head (helmet and ear pods), visor, goggles, eyes. Gradients are vertical, in canvas units. -->
+  <defs>
+    <linearGradient id="g-head" gradientUnits="userSpaceOnUse" x1="0" y1="130" x2="0" y2="1065">
+      <stop offset="0" stop-color="#B16CFF"/><stop offset="1" stop-color="#2E62FF"/>
+    </linearGradient>
+    <linearGradient id="g-lens" gradientUnits="userSpaceOnUse" x1="0" y1="258" x2="0" y2="545">
+      <stop offset="0" stop-color="#7B10F5"/><stop offset="1" stop-color="#1735C0"/>
+    </linearGradient>
+    <linearGradient id="g-visor" gradientUnits="userSpaceOnUse" x1="0" y1="488" x2="0" y2="995">
+      <stop offset="0" stop-color="#0A2296"/><stop offset="1" stop-color="#060F70"/>
+    </linearGradient>
+  </defs>
+  <path id="head" fill="url(#g-head)" d="M150 560C165 380 220 262 330 205C420 157 510 132 600 132C690 132 780 157 870 205C980 262 1035 380 1050 560L1090 560Q1120 562 1135 590L1165 640Q1175 660 1175 690L1175 820Q1175 845 1155 860C950 1010 780 1065 600 1065C420 1065 250 1010 45 860Q25 845 25 820L25 690Q25 660 35 640L65 590Q80 562 110 560Z"/>
+  <path id="visor" fill="url(#g-visor)" d="M245 625Q250 590 295 578Q340 600 385 600Q470 600 525 545Q545 520 553 488Q600 484 647 488Q655 520 675 545Q730 600 815 600Q860 600 905 578Q950 590 955 625L960 870Q962 900 935 913C820 965 700 995 600 995C500 995 380 965 265 913Q238 900 240 870Z"/>
+  <g id="goggles" fill="url(#g-lens)">
+    <path d="M285 290Q330 258 420 258Q480 258 500 280Q530 320 530 400Q530 470 500 490Q440 545 360 545Q290 545 265 515Q245 480 245 400Q245 320 285 290Z"/>
+    <path d="M915 290Q870 258 780 258Q720 258 700 280Q670 320 670 400Q670 470 700 490Q760 545 840 545Q910 545 935 515Q955 480 955 400Q955 320 915 290Z"/>
+    <path d="M560 388Q600 384 640 388Q636 410 640 432Q600 428 560 432Q564 410 560 388Z"/>
+  </g>
+  <g id="eyes" fill="#22F5FF">
+    <rect x="432" y="683" width="94" height="179" rx="47"/>
+    <rect x="672" y="683" width="94" height="179" rx="47"/>
+  </g>
+</svg>

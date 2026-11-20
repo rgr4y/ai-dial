@@ -18,11 +18,12 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { frameFile, raw565a8 } from './anim/frames.mjs';
+import { CF_A8, frameFile, raw565a8, rawA8 } from './anim/frames.mjs';
 import { scenes as sendScenes, sets as sendSets } from './anim/send.mjs';
 import { scenes as denyScenes, sets as denySets } from './anim/deny_send.mjs';
 import { scenes as workScenes, sets as workSets } from './anim/work.mjs';
 import { scenes as grokScenes, sets as grokSets } from './anim/grok.mjs';
+import { scenes as copilotScenes, sets as copilotSets } from './anim/copilot.mjs';
 import { render } from './anim/render.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -33,16 +34,18 @@ const OUT = process.argv[3] ?? join(ROOT, 'bridge/assets/claude');
 const js = readFileSync(join(SRC, 'data.js'), 'utf8');
 const data = JSON.parse(js.slice(js.indexOf('{'), js.lastIndexOf('}') + 1));
 const pet = data.pets.find((p) => p.engine === 'claude');
-const scriptedScenes = { ...sendScenes, ...denyScenes, ...workScenes, ...grokScenes };
-const scriptedSets = { ...sendSets, ...denySets, ...workSets, ...grokSets };
+const scriptedScenes = { ...sendScenes, ...denyScenes, ...workScenes, ...grokScenes, ...copilotScenes };
+const scriptedSets = { ...sendSets, ...denySets, ...workSets, ...grokSets, ...copilotSets };
 
 
 const files = {}, sets = {}, blobs = {};  // blobs: path -> bytes, written only if the rev changed
 let rawBytes = 0, packedBytes = 0;
 
 // Pack one frame (straight-alpha RGBA) as <name>/<k>.bin.
-function addFrame(name, k, w, h, rgba) {
-  const raw = raw565a8({ w, h, rgba }), file = frameFile(w, h, raw), path = `${name}/${k}.bin`;
+// a8: alpha only (frames.mjs rawA8), for art the dial tints.
+function addFrame(name, k, w, h, rgba, a8 = false) {
+  const raw = a8 ? rawA8({ w, h, rgba }) : raw565a8({ w, h, rgba });
+  const file = a8 ? frameFile(w, h, raw, CF_A8) : frameFile(w, h, raw), path = `${name}/${k}.bin`;
   blobs[path] = file;
   files[path] = { size: file.length, sha256: createHash('sha256').update(file).digest('hex') };
   sets[name].push(path);
@@ -63,12 +66,18 @@ function frames(fr, name) {
 }
 
 // Scenes by role; the dial asks for these names (buddy/ui.h). listening = voice: not used.
+// Codex's pet rides along as codex_relax (its turn on the idle face) and codex_work (a busy Codex session: hook.sh
+// codex, heartbeat `agent`).
 const scenes = {};
-for (const [role, key] of [['work', 'working'], ['build', 'working_alt'], ['send', 'sending'], ['alert', 'alert'], ['relax', 'relaxing']]) {
-  const sc = pet[key];
-  if (!sc || scriptedScenes[role]) continue;  // scripted scenes (scripts/anim/) replace the upstream one
+const codex = data.pets.find((p) => p.engine === 'codex');
+for (const [src, prefix, roles] of [
+  [pet, '', [['work', 'working'], ['build', 'working_alt'], ['send', 'sending'], ['alert', 'alert'], ['relax', 'relaxing']]],
+  [codex, 'codex_', [['work', 'working'], ['relax', 'relaxing']]],
+]) for (const [role, key] of roles) {
+  const sc = src[key];
+  if (!sc || (!prefix && scriptedScenes[role])) continue;  // scripted scenes (scripts/anim/) replace the upstream one
   const steps = sc.steps;  // level 0 only (listening has 5 levels for voice loudness; we use the quiet one)
-  scenes[role] = {
+  scenes[prefix + role] = {
     name: sc.name, w: sc.w, h: sc.h, dx: sc.dx, dy: sc.dy, steps, step_ms: sc.step_ms,
     // Layers back to front: body (translate by step_dy; missing = 0), then overlay.
     layers: [
@@ -87,7 +96,7 @@ for (const [role, key] of [['work', 'working'], ['build', 'working_alt'], ['send
 // Scripted scenes: parts rendered from art/claude/ by scripts/anim/ (each scene is its own module with the same exports; merge it in above).
 for (const [name, fr] of Object.entries(scriptedSets)) {
   sets[name] = [];
-  fr.forEach((f, k) => { const px = render(f.svg); addFrame(name, k, px.w, px.h, px.rgba); });
+  fr.forEach((f, k) => { const px = render(f.svg); addFrame(name, k, px.w, px.h, px.rgba, f.a8); });
 }
 Object.assign(scenes, scriptedScenes);
 

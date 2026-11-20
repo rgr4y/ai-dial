@@ -43,22 +43,31 @@ export function unrle(src, outLen) {
   return out.subarray(0, outLen);
 }
 
-// lv_image_header_t (magic 0x19, cf RGB565A8 0x14, flags COMPRESSED 0x08, w, h, stride) + lv_image_compressed_t
-// header (method RLE = 1, compressed size, decompressed size) + RLE body.
-export function frameFile(w, h, raw) {
+// lv_image_header_t (magic 0x19, cf RGB565A8 0x14 or A8 0x0E, flags COMPRESSED 0x08, w, h, stride) +
+// lv_image_compressed_t header (method RLE = 1, compressed size, decompressed size) + RLE body.
+export const CF_RGB565A8 = 0x14, CF_A8 = 0x0e;
+export function frameFile(w, h, raw, cf = CF_RGB565A8) {
   const body = rle(raw);
   if (!unrle(body, raw.length).equals(raw)) throw new Error('RLE round trip failed');
   const head = Buffer.alloc(24);
   head.writeUInt8(0x19, 0);
-  head.writeUInt8(0x14, 1);
+  head.writeUInt8(cf, 1);
   head.writeUInt16LE(0x08, 2);
   head.writeUInt16LE(w, 4);
   head.writeUInt16LE(h, 6);
-  head.writeUInt16LE(w * 2, 8);
+  head.writeUInt16LE(cf === CF_A8 ? w : w * 2, 8);
   head.writeUInt32LE(1, 12);
   head.writeUInt32LE(body.length, 16);
   head.writeUInt32LE(raw.length, 20);
   return Buffer.concat([head, body]);
+}
+
+// Alpha only: one byte a pixel. LVGL draws an A8 image as a fill in its image_recolor colour through this mask
+// (lv_draw_sw_img.c), so it suits one-colour art that the dial tints anyway (the Grok bodies).
+export function rawA8({ w, h, rgba }) {
+  const raw = Buffer.alloc(w * h);
+  for (let i = 0; i < w * h; i++) raw[i] = rgba[i * 4 + 3];
+  return raw;
 }
 
 // Straight-alpha RGBA -> RGB565 plane then A8 plane.
