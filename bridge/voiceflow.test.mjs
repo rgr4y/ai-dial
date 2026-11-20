@@ -24,7 +24,7 @@ function make(o = {}) {
     synthesize: async () => { if (t.synthFail) throw new Error('tts down'); return Buffer.alloc(44 + 32000); }, stashTts: () => 'w1', wavMs: () => 1000,
     typeIntoTty: async (tty, text) => (t.typed.push([tty, text]), true),
     typeIntoTmuxSession: async (name, text) => (t.tmux.push([name, text]), true),
-    tmuxHasSession: async () => t.tmuxUp, assistant: 'voice',
+    tmuxHasSession: async () => t.tmuxUp, assistant: 'voice', chat: async (x) => (t.chatted = x, t.chat ?? { why: 'no key' }),
     answerPrompt: (sid, pid, dec) => t.answered.push([sid, pid, dec]),
   });
   // One hold: start, words arrive, release; resolves when routing is done.
@@ -83,14 +83,19 @@ test('a new voiceStart drops the pending send and aborts a stt still open', asyn
   m.flow.voiceStart(m.dial);  // the second start finds the first one's stt still open
   assert.equal(m.t.aborted, 1);
 });
-test('send with no tty known: error card, nothing typed', async () => {
-  const m = make({ route: { action: 'send', sid: 'a', text: 'x', via: 'rule' }, ttys: {} });
+test('send with no tty known (VS Code session): the assistant answers instead', async () => {
+  const m = make({ route: { action: 'send', sid: 'a', text: 'x', via: 'rule' }, ttys: {}, tmuxUp: false, chat: { text: 'Hi.' } });
   await m.hold();
-  assert.deepEqual(m.t.said, [{ error: 'No terminal for that session' }]);
-  assert.equal(m.dial.pending, null);
+  assert.equal(m.t.chatted, 'x');
+  assert.deepEqual(m.t.said, [{ final: 'Hi.' }]);
   await sent(m);
   assert.deepEqual(m.t.typed, []);
-  assert.ok(logs(m).includes('voice: no terminal known for session a, dropped'));
+  assert.ok(logs(m).includes('voice: no terminal known for session a, to the assistant'));
+});
+test('nothing focused and no session has a terminal: the assistant, not "Which session?"', async () => {
+  const m = make({ route: { action: 'send', sid: undefined, text: 'x', via: 'model' }, ttys: {}, tmuxUp: false, chat: { text: 'Hi.' } });
+  await m.hold();
+  assert.deepEqual(m.t.said, [{ final: 'Hi.' }]);
 });
 test('empty transcript: "Didn\'t catch that", router not called', async () => {
   const m = make({ route: { action: 'send', sid: 'a', text: 'x' } });
@@ -119,12 +124,22 @@ test('assistant route: tmux session present -> typed into it on send', async () 
   assert.ok(logs(m).includes('voice: router model (chat) -> assistant'));
   assert.ok(logs(m).includes('voice: typed 10 chars into assistant'));
 });
-test('assistant route: tmux session absent -> "Assistant offline", nothing pending', async () => {
+test('assistant route: tmux absent, built-in down -> "Assistant offline", nothing pending', async () => {
   const m = make({ route: { action: 'assistant', text: 'hi', via: 'model' }, tmuxUp: false });
   await m.hold();
   assert.deepEqual(m.t.said, [{ error: 'Assistant offline' }]);
   assert.equal(m.dial.pending, null);
-  assert.ok(logs(m).includes('voice: assistant tmux session "voice" not running, dropped'));
+  assert.ok(logs(m).includes('voice: built-in assistant failed: no key'));
+});
+test('assistant route: tmux absent -> built-in answer on the card, spoken on send', async () => {
+  const m = make({ route: { action: 'assistant', text: 'what time is it in tokyo', via: 'rule' }, tmuxUp: false, chat: { text: 'It is 3 AM.' } });
+  await m.hold();
+  assert.equal(m.t.chatted, 'what time is it in tokyo');
+  assert.deepEqual(m.t.said, [{ final: 'It is 3 AM.' }]);
+  await sent(m);
+  await tick();
+  assert.equal(m.t.announced.length, 1);
+  assert.ok(logs(m).includes('voice: built-in assistant replied 11 chars'));
 });
 test('allow route answers the open prompt on send; deny too', async () => {
   for (const [decision, label] of [['allow', 'Allow'], ['deny', 'Deny']]) {

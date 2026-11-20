@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { Board } from './board.mjs';
-import { parseJson, route, sessionList } from './router.mjs';
+import { chat, parseJson, route, sessionList } from './router.mjs';
 
 const mk = (prompts) => {
   const board = new Board(), now = 1e12;
@@ -86,4 +86,15 @@ test('parseJson', () => {
   assert.deepEqual(parseJson('ok {"target":"a","text":"b"} done'), { target: 'a', text: 'b' });
   assert.equal(parseJson('{"target":"a"}'), null);
   assert.equal(parseJson('{bad'), null);
+});
+test('no sessions: straight to the assistant, no model call', async () => {
+  const r = await go('what is the weather', never, { sessions: [], focusedId: undefined });
+  assert.deepEqual([r.action, r.text, r.via, r.why], ['assistant', 'what is the weather', 'rule', 'no sessions']);
+});
+test('chat: spoken answer text, or why', async () => {
+  const f = fake('  Sunny, 20 degrees. ');
+  assert.deepEqual(await chat({ text: 'weather?', env, fetchFn: f }), { text: 'Sunny, 20 degrees.' });
+  assert.equal(JSON.parse(f.calls[0][1].body).messages[0].content, 'weather?');
+  assert.deepEqual(await chat({ text: 'x', env: {}, fetchFn: never }), { why: 'no ANTHROPIC_API_KEY' });
+  assert.deepEqual(await chat({ text: 'x', env, fetchFn: fake('', { ok: false, status: 502 }) }), { why: 'api: HTTP 502' });
 });

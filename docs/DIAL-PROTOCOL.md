@@ -138,9 +138,10 @@ dial   ui {voice:"send"} (or voice gone = cancelled)     bridge types text + Ret
 ("tell api to ...", "api, ...", bare allow/deny with one open prompt), else one JSON call (`{target, text}`, 3 s limit) to a
 fast model through cli-proxy-api. The `final` line then carries what will happen on `send`: the text (focused session),
 `name: text` (another session), `Assistant: text` (typed into the tmux session `voice`, a Claude that can act on the Mac),
-`Allow|Deny name: Tool` (answers that session's open prompt via the held PermissionRequest), or the router's spoken reply
-(nothing happens on `send`). No wire change: the dial still only sees `final`, or `error` ("Assistant offline" when the
-`voice` tmux session is not running). API error, junk or timeout: types into `sid`, or goes to the assistant when `sid` is
+`Allow|Deny name: Tool` (answers that session's open prompt via the held PermissionRequest), or a reply to speak
+(said on `send`). With no sessions at all, the words go straight to the assistant. When the `voice` tmux session is not
+running, a built-in assistant answers instead (`router.mjs` `chat`: one short spoken-style reply from the same model, no
+tools, no memory): the reply is the `final` and is spoken on `send`. `error` "Assistant offline" only when that call fails. API error, junk or timeout: types into `sid`, or goes to the assistant when `sid` is
 empty, with a log line.
 
 **Ask.** When the words must go to a session and none is on the face and none is named, the bridge keeps the text, speaks
@@ -153,8 +154,9 @@ on any outcome and by a new hold.
 
 - Lines carry one of `text` (partial), `final` (the transcript; empty = nothing heard) or `error` (shown for 2 s).
 - The bridge only types text it produced itself for that dial (`final`), into the terminal of `sid`
-  (`Board.tty(sid)`, from `hook.sh`'s `tty`, matched to an iTerm session's `tty` by AppleScript). No tty for the session:
-  the bridge answers with an `error` instead of a `final`; nothing is typed. A `send` with no pending text is ignored.
+  (`Board.tty(sid)`, from `hook.sh`'s `tty`, matched to an iTerm session's `tty` by AppleScript). No tty for the session
+  (Claude Code in VS Code, say): the words go to the assistant instead; nothing is typed. "Which session?" is only asked
+  when some session has a tty. A `send` with no pending text is ignored.
 - Text goes in with `write text … newline NO`, then a separate bare newline (Claude Code reads text + Return in one
   burst as a paste). It travels as an `osascript` argument, never inside the script.
 - ESPHome's voice assistant takes **one** API client. The bridge subscribes (`SubscribeVoiceAssistantRequest`); if Home

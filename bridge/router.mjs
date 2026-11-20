@@ -8,7 +8,7 @@
 //
 // route() never throws and never picks a session outside the list it was given. A failed or slow call, or junk back,
 // falls back to the focused session, or to the assistant when nothing is on the face (via:'fallback' + why, so the
-// caller logs it).
+// caller logs it). No sessions at all goes straight to the assistant.
 //
 // Result: { action:'send', sid, text } | { action:'answer', sid, decision } | { action:'assistant', text } |
 // { action:'speak', text }, plus via ('rule'|'model'|'fallback') and, for a fallback, why. sid is undefined when
@@ -99,21 +99,34 @@ export async function route({ text, sessions, focusedId, env = {}, fetchFn = fet
   const fallback = (why) => (focusedId
     ? { action: 'send', sid: focusedId, text, via: 'fallback', why }
     : { action: 'assistant', text, via: 'fallback', why });
-  if (!env.apiKey) return fallback('no ANTHROPIC_API_KEY');
+  if (!sessions.length) return { action: 'assistant', text, via: 'rule', why: 'no sessions' };
+  const r2 = await ask(SYSTEM, request(text, sessions, focusedId), { env, fetchFn, timeoutMs });
+  if (r2.why) return fallback(r2.why);
+  const j = parseJson(r2.text);
+  return j ? { ...interpret(j, sessions, focusedId), via: 'model' } : fallback('no usable JSON');
+}
+
+// One /v1/messages call -> { text } or { why } (never throws). No key = no call.
+async function ask(system, content, { env = {}, fetchFn = fetch, timeoutMs }) {
+  if (!env.apiKey) return { why: 'no ANTHROPIC_API_KEY' };
   try {
     const res = await fetchFn(`${env.baseUrl || 'http://127.0.0.1:8318'}/v1/messages`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': env.apiKey, 'anthropic-version': '2023-06-01' },
       // max_tokens >= 1000: gemini-3-flash spends some on a thinking block before the text block
-      body: JSON.stringify({ model: MODEL, max_tokens: 1024, system: SYSTEM,
-                             messages: [{ role: 'user', content: request(text, sessions, focusedId) }] }),
+      body: JSON.stringify({ model: MODEL, max_tokens: 1024, system, messages: [{ role: 'user', content }] }),
       signal: AbortSignal.timeout(timeoutMs),
     });
-    if (!res.ok) return fallback(`api: HTTP ${res.status}`);
+    if (!res.ok) return { why: `api: HTTP ${res.status}` };
     const msg = await res.json();
-    const j = parseJson(msg.content?.find((b) => b.type === 'text')?.text);
-    return j ? { ...interpret(j, sessions, focusedId), via: 'model' } : fallback('no usable JSON');
+    const text = msg.content?.find((b) => b.type === 'text')?.text?.trim();
+    return text ? { text } : { why: 'empty reply' };
   } catch (e) {
-    return fallback(`api: ${e.message}`);
+    return { why: `api: ${e.message}` };
   }
 }
+
+// The built-in assistant, used when the tmux "voice" Claude isn't running: one spoken-style answer, no tools, no memory.
+const CHAT_SYSTEM = `You are a voice assistant on a small round desk dial. Your answer is spoken aloud and shown on a tiny screen.
+Answer in one to three short plain sentences. No markdown, lists, code, emoji or URLs. If you cannot do something (you have no tools), say so briefly.`;
+export const chat = ({ text, env, fetchFn, timeoutMs = 6000 }) => ask(CHAT_SYSTEM, text, { env, fetchFn, timeoutMs });

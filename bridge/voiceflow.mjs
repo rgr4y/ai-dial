@@ -13,6 +13,7 @@
 //   ttsUrl(addr, id)      URL of a stashed WAV; synthesize(text), stashTts(wav), wavMs(wav)
 //   PLAYING               the media player state that means "announcing"
 //   typeIntoTty, typeIntoTmuxSession, tmuxHasSession, assistant (tmux session name)
+//   chat(text)            -> { text } | { why }: the built-in assistant when the tmux one isn't running
 //   answerPrompt(sid, promptId, decision), log
 export const ASK = 'Which session?', ASK_ARM_MS = 3000;  // the dial starts the re-listen well inside this
 
@@ -59,19 +60,11 @@ export function createVoiceFlow(d) {
       log(`voice: router ${r.via}${r.why ? ` (${r.why})` : ''} -> ${r.action}`);
       const name = (sid) => sessions.find((s) => s.id === sid)?.name || sid;
       if (r.action === 'send') {
-        if (!r.sid) return askSession(dial, r.text);  // nothing on the face, none named
+        // Nothing on the face, none named: ask which, if any session can take typing; else the assistant answers.
+        if (!r.sid) return sessions.some((x) => board.tty(x.id)) ? askSession(dial, r.text) : toAssistant(dial, r.text);
         return queueSend(dial, r.sid, r.text, sessions, focusedId);
       }
-      if (r.action === 'assistant') {
-        if (!(await d.tmuxHasSession(d.assistant))) {
-          log(`voice: assistant tmux session "${d.assistant}" not running, dropped`);
-          return say(dial, { error: 'Assistant offline' });  // never re-route to another session
-        }
-        dial.pending = { run: () => d.typeIntoTmuxSession(d.assistant, r.text).then(
-          (ok) => log(ok ? `voice: typed ${r.text.length} chars into assistant` : 'voice: assistant went away, dropped'),
-          (e) => log('voice: assistant tmux failed:', e.message)) };
-        return say(dial, { final: `Assistant: ${r.text}` });
-      }
+      if (r.action === 'assistant') return toAssistant(dial, r.text);
       if (r.action === 'answer') {
         const p = board.sessions.get(r.sid)?.prompt;
         dial.pending = { run: () => d.answerPrompt(r.sid, p?.id, r.decision) };
@@ -85,11 +78,30 @@ export function createVoiceFlow(d) {
     });
   }
 
+  // The tmux "voice" Claude when it runs (typed on send), else the built-in assistant: its answer shows on the card and
+  // is spoken on send, like a router "speak".
+  async function toAssistant(dial, text) {
+    if (await d.tmuxHasSession(d.assistant)) {
+      dial.pending = { run: () => d.typeIntoTmuxSession(d.assistant, text).then(
+        (ok) => log(ok ? `voice: typed ${text.length} chars into assistant` : 'voice: assistant went away, dropped'),
+        (e) => log('voice: assistant tmux failed:', e.message)) };
+      return say(dial, { final: `Assistant: ${text}` });
+    }
+    const r = await d.chat(text);
+    if (!r.text) {
+      log(`voice: built-in assistant failed: ${r.why}`);
+      return say(dial, { error: 'Assistant offline' });
+    }
+    log(`voice: built-in assistant replied ${r.text.length} chars`);
+    dial.pending = { run: () => speak(dial, r.text).catch((e) => log('voice: speak failed:', e.message)) };
+    say(dial, { final: r.text });
+  }
+
   // Type text into a session once the confirm card runs out.
   function queueSend(dial, sid, text, sessions, focusedId) {
-    if (!board.tty(sid)) {
-      log(`voice: no terminal known for session ${sid}, dropped`);
-      return say(dial, { error: 'No terminal for that session' });
+    if (!board.tty(sid)) {  // only Claude Code in an iTerm tab can be typed into (VS Code, etc. can't): ask the assistant
+      log(`voice: no terminal known for session ${sid}, to the assistant`);
+      return toAssistant(dial, text);
     }
     dial.pending = { run: () => typeSession(sid, text) };
     log(`voice: confirm -> ${sessions.find((s) => s.id === sid)?.name || sid} (${text.length} chars)`);

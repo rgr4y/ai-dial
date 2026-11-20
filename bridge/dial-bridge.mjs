@@ -37,7 +37,7 @@ import { join, normalize, sep } from 'node:path';
 import esphome from '@2colors/esphome-native-api';
 import { Board } from './board.mjs';
 import { botLooks, conversationId, decodeKey, eventsSince, readRoster } from './grokbot.mjs';
-import { route, sessionList } from './router.mjs';
+import { chat, route, sessionList } from './router.mjs';
 import { createVoiceFlow } from './voiceflow.mjs';
 import { cleanText, openStt, registerVoiceMessages, stashTts, synthesize, tmuxHasSession, ttsFiles, typeIntoTmuxSession, typeIntoTty, wavMs } from './voice.mjs';
 
@@ -184,6 +184,7 @@ const { voiceStart, voiceStop, speak, onUiForVoice } = createVoiceFlow({
   dials, board, say, log, PLAYING, sessionList, route, routerEnv: ROUTER_ENV, routerTimeoutMs: ROUTER_TIMEOUT_MS,
   openStt: (onPartial) => openStt({ host: STT_HOST, port: STT_PORT, onPartial }),
   cleanText, answerPrompt, typeIntoTty, typeIntoTmuxSession, tmuxHasSession, assistant: ASSISTANT,
+  chat: (text) => chat({ text, env: ROUTER_ENV }),
   synthesize: (text) => synthesize(text, { host: TTS_HOST, port: TTS_PORT }), stashTts, wavMs,
   ttsUrl: (addr, id) => `http://${addr}:${ASSETS_PORT}/tts/${id}.wav`,
   localAddress: (dial) => dial?.client?.connection?.frameHelper?.socket?.localAddress?.replace(/^::ffff:/, ''),
