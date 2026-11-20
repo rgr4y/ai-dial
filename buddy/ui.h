@@ -609,6 +609,19 @@ inline void voice_note(const char *t, uint32_t now) {
   u.voice_text = t;
   u.voice_at = now;
 }
+// Open the mic and enter LISTEN; ask marks the bridge's follow-up question (no finger, ends on a timer or a tap).
+inline void start_listen(uint32_t now, bool ask) {
+  Ui &u = ui();
+  if (!u.on_voice || !u.on_voice(true)) {
+    voice_note("Voice is offline", now);
+    return;
+  }
+  u.voice = Voice::LISTEN;
+  u.voice_ask = ask;
+  u.voice_at = now;
+  u.voice_stopped = false;
+  if (u.on_sound) u.on_sound(Sound::LISTENING);
+}
 // The session the face is about: the focused working one, an opened notice's, or the one whose reply is on the card.
 // Empty when the face is about nobody: the bridge router then needs a session name.
 inline std::string voice_target() {
@@ -633,14 +646,7 @@ inline void on_hold(lv_event_t *) {
   u.voice_text.clear();
   u.voice_ask = false;
   // No session on the face (idle, card dismissed) still listens: the bridge's router picks one by name, else asks.
-  if (!u.on_voice || !u.on_voice(true)) {
-    voice_note("Voice is offline", now);
-  } else {
-    u.voice = Voice::LISTEN;
-    u.voice_at = now;
-    u.voice_stopped = false;
-    if (u.on_sound) u.on_sound(Sound::LISTENING);
-  }
+  start_listen(now, false);
   update(now);
 }
 // Stop capture once, whatever state the voice flow ends in.
@@ -993,13 +999,7 @@ inline void update(uint32_t now) {
     u.voice_seen = vl.seq;
     if (u.voice == Voice::WAIT && !vl.ask.empty()) {
       u.voice_text = vl.ask;  // the question stays on the card while the mic re-arms
-      if (u.on_voice && u.on_voice(true)) {
-        u.voice = Voice::LISTEN;
-        u.voice_ask = true;
-        u.voice_at = now;
-        u.voice_stopped = false;
-        if (u.on_sound) u.on_sound(Sound::LISTENING);
-      } else voice_note("Voice is offline", now);
+      start_listen(now, true);
     } else if ((u.voice == Voice::LISTEN || u.voice == Voice::WAIT) && vl.error.empty() && !vl.final) {
       u.voice_text = vl.text;
     } else if (u.voice == Voice::WAIT && !vl.error.empty()) {
