@@ -6,6 +6,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <functional>
+#include <map>
 #include <string>
 #include <strings.h>
 #include <utility>
@@ -63,10 +64,11 @@ static constexpr uint32_t USAGE_WARN = 0xe5e510, USAGE_HOT = 0xcd3131;   // them
 // From 80% the brand colour gives way to warning yellow, from 95% to red.
 inline uint32_t usage_ink(uint32_t pct, uint32_t base) { return pct >= 95 ? USAGE_HOT : pct >= 80 ? USAGE_WARN : base; }
 static constexpr int SPLASH_BIAS = -50;      // splash: pet sits above the wordmark
+static constexpr uint32_t USAGE_ALARM_SHOWS = 3;  // alarm flashes per provider per percentage; a new % shows it again
 static constexpr uint32_t USAGE_ALARM_PCT = 80;  // at or above: the flash also pulses a big red % mid-screen
 static constexpr int RECAP_MAX = 2000;          // codepoints; focus.c:793 cut at 90, the card now scrolls instead
 // Recap card past 4 lines: hold at the top, scroll to the end, hold, scroll back up quicker, repeat.
-static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 60, CARD_BACK_PX_S = 120;
+static constexpr uint32_t CARD_HOLD_MS = 2500, CARD_SCROLL_PX_S = 51, CARD_BACK_PX_S = 120;
 // Finger-scrolled card: autoscroll resumes this long after the last touch or scroll movement.
 static constexpr uint32_t CARD_MANUAL_MS = 5000;
 // A reply card moves to the bell once read: untouched, after one full autoscroll pass (down and back), or after
@@ -124,7 +126,10 @@ struct Ui : power::Screen {  // asleep, last_activity, wake/sleep requests: powe
   static constexpr int BURST_N = 18;
   lv_obj_t *burst[BURST_N] = {};     // bridge connected: green sparks fly out from the centre
   int16_t burst_r[BURST_N] = {};
-  lv_obj_t *alarm = nullptr;  // usage >= USAGE_ALARM_PCT: big red "87%" pulsing in place of the pet
+  lv_obj_t *alarm = nullptr;  // usage >= USAGE_ALARM_PCT: big red "87%" pulsing in place of the pet, provider under it
+  lv_obj_t *alarm_pct = nullptr, *alarm_name = nullptr;
+  struct AlarmSeen { uint32_t pct = 0, shows = 0, slot = UINT32_MAX; };
+  std::map<std::string, AlarmSeen> alarm_seen;  // provider -> the % it last alarmed at, how many flashes, last flash slot
 
   ClaudeBuddy *buddy = nullptr;
   View view = View::BRAND;

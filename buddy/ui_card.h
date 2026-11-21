@@ -3,6 +3,9 @@
 
 namespace buddyui {
 
+// Reply text: Inter 20 on a 29 px line pitch (the 30 / 43 px ratio).
+static constexpr int CARD_PITCH = 29;
+
 inline void on_card(lv_event_t *) { tap("card"); }
 // Dismiss above the reply: done with it, same as a card tap. The reply goes and the face shows what's current:
 // the working face if a turn started while reading, else home. One tap (the old double tap on the small Clawd was
@@ -73,19 +76,19 @@ inline void show_card(const std::string &raw, uint32_t now) {
     lv_label_set_text(u.card_text, text.c_str());
     lv_obj_update_layout(u.card);
     int full = lv_obj_get_height(u.card_text);
-    int lines = full / 43 + 1;
+    int lines = full / CARD_PITCH + 1;
     u.card_lines = std::min(lines, 4);
     u.card_overflow = lines > 4;
     u.card_shown_at = now;
     u.card_pass_ms = CARD_SHORT_MS;
     if (lines > 4) {
-      lv_obj_set_height(u.card_text, 4 * 43);
-      int dist = full - 4 * 43;
+      lv_obj_set_height(u.card_text, 4 * CARD_PITCH);
+      int dist = full - 4 * CARD_PITCH;
       start_card_anim(dist);
       u.card_pass_ms = 2 * CARD_HOLD_MS + dist * 1000 / CARD_SCROLL_PX_S + dist * 1000 / CARD_BACK_PX_S;
     }
   }
-  int h = u.card_lines * 43 + 2 * 21;
+  int h = u.card_lines * CARD_PITCH + 2 * 21;
   int top = 176 + (200 - h) / 2;  // centred in y 176-376 (focus.c:49-56)
   lv_obj_set_y(u.card, top);
   place_dismiss(top);
@@ -100,9 +103,9 @@ inline void build_card(lv_obj_t *root) {
   lv_obj_set_clickable(u.card, true);
   lv_obj_add_event_cb(u.card, on_card, LV_EVENT_CLICKED, nullptr);
   lv_obj_add_event_cb(u.card, on_hold, LV_EVENT_LONG_PRESSED, nullptr);  // hold on a reply talks to its session
-  u.card_text = mk_label(u.card, u.f.f30, RECAP);
+  u.card_text = mk_label(u.card, u.f.f20, RECAP);
   lv_obj_set_width(u.card_text, 348);  // card 368 - 2 x 10 pad
-  lv_obj_set_style_text_line_space(u.card_text, 43 - lv_font_get_line_height(u.f.f30), 0);  // 43 px pitch
+  lv_obj_set_style_text_line_space(u.card_text, CARD_PITCH - lv_font_get_line_height(u.f.f20), 0);
   lv_label_set_long_mode(u.card_text, LV_LABEL_LONG_MODE_WRAP);  // fixed height past 4 lines: clips and scrolls
   lv_obj_set_scrollbar_mode(u.card_text, LV_SCROLLBAR_MODE_OFF);
   // Drag target: it must be the pressed object for the indev to scroll it. EVENT_BUBBLE passes CLICKED up to u.card.

@@ -99,7 +99,8 @@ Each line is one Claude desktop Hardware Buddy JSON object
  "word":"Claude",                                   // brand view
  "perm":{"title":"Allow Bash?","hint":"api: rm -rf /tmp/x","count":"1 of 2 waiting"},
  "voice":"listening|wait|confirm|send|note","sid":"s1",   // hold-to-talk (section 5): state, and the session it types into
- "alarm":"87%"}                                     // usage_pct >= 80 during the usage flash: red, pulsing, pet hidden
+ "alarm":"87% Grok usage"}                          // usage_pct >= 80 during the usage flash: red, pulsing, pet hidden,
+                                                    // provider under it; 3 flashes per provider per percentage
 ```
 Scenes and shimmer animate on the receiver's clock: the timing is fixed, so a mirror only needs the names.
 

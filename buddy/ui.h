@@ -57,7 +57,7 @@ inline void publish_state() {
       }
     }
   }
-  if (vis(u.alarm)) d["alarm"] = lv_label_get_text(u.alarm);  // pulse runs on the receiver clock (usage window)
+  if (vis(u.alarm)) d["alarm"] = std::string(lv_label_get_text(u.alarm_pct)) + " " + lv_label_get_text(u.alarm_name);  // pulse runs on the receiver clock (usage window)
   std::string out;
   serializeJson(d, out);
   if (out == u.last_state) return;
@@ -218,7 +218,14 @@ inline void init(lv_obj_t *root, ClaudeBuddy *buddy, const Fonts &fonts) {
     lv_obj_set_clickable(o, false);
     show(o, false);
   }
-  u.alarm = mk_label(root, u.f.f96b, USAGE_HOT);
+  u.alarm = lv_obj_create(root);
+  lv_obj_remove_style_all(u.alarm);
+  lv_obj_set_size(u.alarm, 300, LV_SIZE_CONTENT);  // no flex in this LVGL build: name placed under the %
+  lv_obj_set_clickable(u.alarm, false);
+  u.alarm_pct = mk_label(u.alarm, u.f.f96b, USAGE_HOT);
+  lv_obj_align(u.alarm_pct, LV_ALIGN_TOP_MID, 0, 0);
+  u.alarm_name = mk_label(u.alarm, u.f.f25, USAGE_HOT);  // which plan the % is: "Grok usage"
+  lv_obj_align(u.alarm_name, LV_ALIGN_TOP_MID, 0, lv_font_get_line_height(u.f.f96b));
   lv_obj_center(u.alarm);
   lv_obj_set_style_transform_pivot_x(u.alarm, LV_PCT(50), 0);
   lv_obj_set_style_transform_pivot_y(u.alarm, LV_PCT(50), 0);

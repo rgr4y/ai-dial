@@ -195,12 +195,19 @@ inline void paint_face(Vis &vis, const Frame &f) {
   if (!s.usage.empty() && !sending && u.voice == Voice::OFF && now % USAGE_EVERY_MS < USAGE_SHOW_MS) {
     arc_text(u.status_arc, s.usage.c_str(), usage_ink(s.usage_pct, provider_ink(s.usage, RELAX_LINE)));
     // Nearly out: the pet steps aside for a pulsing red percentage (no scared/alarmed pet art exists in Harness).
-    if (s.usage_pct >= USAGE_ALARM_PCT && !recap) {
+    // A provider's alarm shows for USAGE_ALARM_SHOWS flashes, then waits for its % to change.
+    std::string prov = s.usage.substr(0, s.usage.find(' '));
+    auto &seen = u.alarm_seen[prov];
+    if (seen.pct != s.usage_pct) seen = {s.usage_pct, 0, UINT32_MAX};
+    bool hot = s.usage_pct >= USAGE_ALARM_PCT && !recap && !u.asleep;  // only flashes you can see count
+    if (hot && seen.slot != now / USAGE_EVERY_MS) seen.slot = now / USAGE_EVERY_MS, seen.shows++;
+    if (hot && seen.shows <= USAGE_ALARM_SHOWS) {
       u.scene.stop();
       u.alert.stop();
       char pct[8];
       snprintf(pct, sizeof(pct), "%u%%", (unsigned) s.usage_pct);
-      set_text(u.alarm, pct);
+      set_text(u.alarm_pct, pct);
+      set_text(u.alarm_name, (prov + " usage").c_str());
       vis.on(u.alarm);
     }
   }
