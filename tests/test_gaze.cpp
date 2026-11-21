@@ -6,9 +6,9 @@
 #include "../buddy/gaze.h"
 
 int main() {
-  uint32_t t = 0;
-  auto feed = [&](float deg_x, float deg_y, int n) {  // tilt about each axis, n samples 50 ms apart
-    for (int i = 0; i < n; i++, t += 50) {
+  uint32_t t = 0, step = 50;
+  auto feed = [&](float deg_x, float deg_y, int n) {  // tilt about each axis, n samples `step` ms apart
+    for (int i = 0; i < n; i++, t += step) {
       float ax = std::sin(deg_x * 3.14159265f / 180), ay = std::sin(deg_y * 3.14159265f / 180);
       gaze::update(ax, ay, std::sqrt(std::fmax(0.f, 1 - ax * ax - ay * ay)), t);
     }
@@ -38,6 +38,12 @@ int main() {
   gaze::reset();  // screen dark: next sample is a fresh baseline, even at a new tilt
   feed(-40, 10, 1);
   assert(!gaze::look().on);
+
+  // Tick rate doesn't change the feel: 200 ms of tilt at 50 ms and at 25 ms land on about the same look.
+  gaze::reset(), feed(0, 0, 1), feed(25, 0, 4);
+  float at50 = gaze::look().x;
+  gaze::reset(), step = 25, feed(0, 0, 1), feed(25, 0, 8);
+  assert(std::fabs(gaze::look().x - at50) < 0.05f);
 
   puts("gaze ok");
 }

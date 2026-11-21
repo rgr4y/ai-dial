@@ -109,7 +109,7 @@ motion:
     i2c_id: bus_a
     accelerometer_odr: 125HZ
     gyroscope_odr: 125HZ
-    update_interval: 50ms
+    update_interval: ${frame_ms}ms  # buddy-ui.yaml UI tick
     axis_map: { x: x, y: y, z: z }
 
 lvgl:

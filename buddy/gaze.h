@@ -11,17 +11,20 @@
 
 namespace gaze {
 
-constexpr float FOLLOW = 0.06f;    // baseline closes this much of the gap per sample (50 ms): ~0.8 s time constant
+// FOLLOW and EASE are per 50 ms (REF_MS); update() rescales them to the real gap between samples, so the UI tick
+// (buddy-ui.yaml frame_ms) can change without changing how the eyes feel.
+constexpr float REF_MS = 50;
+constexpr float FOLLOW = 0.06f;    // baseline closes this much of the gap per 50 ms: ~0.8 s time constant
 constexpr float GAIN = 4.0f;       // gravity-direction change to full look: 0.25 (~15 deg of fresh tilt) = 1
 constexpr float START = 0.05f;     // change that counts as moving (~3 deg); below it the dial is still
 constexpr uint32_t HOLD_MS = 800;  // still this long: ease home
-constexpr float EASE = 0.35f;      // eye offset closes this much of the gap to its target per sample
+constexpr float EASE = 0.35f;      // eye offset closes this much of the gap to its target per 50 ms
 constexpr float HOME = 0.04f;      // eased this close to centre: hand back to the scene
 
 struct State {
   bool init = false, on = false;
   float bx = 0, by = 0, x = 0, y = 0;  // baseline gravity direction (x, y of the unit vector); eye offset
-  uint32_t moved = 0;
+  uint32_t moved = 0, last = 0;  // last: previous sample's time
 };
 inline State &st() {
   static State s;
@@ -32,6 +35,12 @@ inline void reset() { st() = State{}; }
 
 inline float clamp1(float v) { return v < -1 ? -1 : v > 1 ? 1 : v; }
 
+// Fraction k per REF_MS, applied over dt ms. A late sample (missed ticks) counts as at most 4 periods.
+inline float per_dt(float k, uint32_t dt) {
+  float n = std::fmin(dt, 4 * REF_MS) / REF_MS;
+  return 1 - std::pow(1 - k, n);
+}
+
 inline void update(float ax, float ay, float az, uint32_t now) {
   State &s = st();
   float m = std::sqrt(ax * ax + ay * ay + az * az);
@@ -39,16 +48,19 @@ inline void update(float ax, float ay, float az, uint32_t now) {
   float gx = ax / m, gy = ay / m;
   if (!s.init) {
     s = State{};
-    s.init = true, s.bx = gx, s.by = gy;
+    s.init = true, s.bx = gx, s.by = gy, s.last = now;
     return;
   }
+  uint32_t dt = now - s.last;
+  s.last = now;
+  float follow = per_dt(FOLLOW, dt), ease = per_dt(EASE, dt);
   float dx = gx - s.bx, dy = gy - s.by;
-  s.bx += dx * FOLLOW, s.by += dy * FOLLOW;
+  s.bx += dx * follow, s.by += dy * follow;
   if (std::fabs(dx) > START || std::fabs(dy) > START) s.moved = now, s.on = true;
   if (!s.on) return;
   bool moving = now - s.moved < HOLD_MS;
   float tx = moving ? clamp1(dx * GAIN) : 0, ty = moving ? clamp1(dy * GAIN) : 0;
-  s.x += (tx - s.x) * EASE, s.y += (ty - s.y) * EASE;
+  s.x += (tx - s.x) * ease, s.y += (ty - s.y) * ease;
   if (!moving && std::fabs(s.x) < HOME && std::fabs(s.y) < HOME) s.on = false, s.x = s.y = 0;
 }
 

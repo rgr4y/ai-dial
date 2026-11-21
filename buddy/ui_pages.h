@@ -3,8 +3,19 @@
 
 namespace buddyui {
 
-// Splash entrance: the wordmark rises 24 px and fades in.
-// Bridge connected: BURST_N green sparks shoot from the centre to the bezel, shrinking and fading (700 ms).
+// Tuning for this file's animations and pages. Spark count is Ui::BURST_N (ui_state.h): it sizes Ui's arrays.
+constexpr uint32_t BURST_MS = 875;                    // spark flight, centre to bezel
+constexpr int BURST_R_MIN = 170, BURST_R_SPREAD = 60;  // each spark's final radius: MIN + rand() % SPREAD
+constexpr int SPARK_D = 14, SPARK_D_MIN = 3;           // spark diameter shrinks from D + MIN to MIN
+constexpr uint32_t SPLASH_MS = 700, SPLASH_DELAY_MS = 250;
+constexpr int SPLASH_RISE = 24;                        // px the wordmark rises
+constexpr uint32_t USAGE_BAR_MS = 500;                 // usage bar grow-in
+constexpr uint32_t BAR_TRACK = 0x2a2c34;               // unfilled usage and OTA bars
+constexpr uint32_t USAGE_RESET_INK = 0x7a7a86;         // usage "time to reset" column
+constexpr int BATTERY_RING_D = 340, BATTERY_RING_W = 24;  // outer radius 170: arc-label glyphs reach in to ~185
+
+// Splash entrance: the wordmark rises SPLASH_RISE px and fades in.
+// Bridge connected: BURST_N green sparks shoot from the centre to the bezel, shrinking and fading (BURST_MS).
 // One anim drives them all; each spark is a small circle, so redraws stay cheap.
 inline void burst_step(void *, int32_t v) {
   Ui &u = ui();
@@ -12,7 +23,7 @@ inline void burst_step(void *, int32_t v) {
   for (int i = 0; i < Ui::BURST_N; i++) {
     float a = i * 2 * PI_F / Ui::BURST_N;
     int r = (int) (u.burst_r[i] * e);
-    int d = (int) (14 * (1 - t)) + 3;
+    int d = (int) (SPARK_D * (1 - t)) + SPARK_D_MIN;
     lv_obj_set_size(u.burst[i], d, d);
     lv_obj_set_pos(u.burst[i], scene::C + (int) (cosf(a) * r) - d / 2, scene::C + (int) (sinf(a) * r) - d / 2);
     lv_obj_set_style_bg_opa(u.burst[i], (lv_opa_t) (255 * (1 - t * t)), 0);
@@ -21,11 +32,11 @@ inline void burst_step(void *, int32_t v) {
 inline void burst() {
   Ui &u = ui();
   for (int i = 0; i < Ui::BURST_N; i++) {
-    u.burst_r[i] = 170 + rand() % 60;
+    u.burst_r[i] = BURST_R_MIN + rand() % BURST_R_SPREAD;
     lv_obj_move_foreground(u.burst[i]);
     show(u.burst[i], true);
   }
-  lv_anim_t a = make_anim(&u, burst_step, 0, 1000, 700);
+  lv_anim_t a = make_anim(&u, burst_step, 0, 1000, BURST_MS);
   lv_anim_set_completed_cb(&a, [](lv_anim_t *) {
     for (auto *o : ui().burst) show(o, false);
   });
@@ -40,12 +51,12 @@ inline void splash_in() {
   };
   auto opa = [](void *o, int32_t v) { lv_obj_set_style_opa((lv_obj_t *) o, (lv_opa_t) v, 0); };
   auto ty = [](void *o, int32_t v) { lv_obj_set_style_translate_y((lv_obj_t *) o, v, 0); };
-  run(u.word, opa, 0, 255, 700, 250);
-  run(u.word, ty, 24, 0, 700, 250);
+  run(u.word, opa, 0, 255, SPLASH_MS, SPLASH_DELAY_MS);
+  run(u.word, ty, SPLASH_RISE, 0, SPLASH_MS, SPLASH_DELAY_MS);
 }
 
 // Usage screen layout: per provider its name, then a row per rate window: label,
-// bar (grows in over 500 ms), percent, time to reset. Block centred vertically.
+// bar (grows in over USAGE_BAR_MS), percent, time to reset. Block centred vertically.
 inline void build_usage() {
   Ui &u = ui();
   const auto &cards = u.buddy->snap().usages;
@@ -81,16 +92,16 @@ inline void build_usage() {
       int cy = y + ROW / 2;
       uint32_t ink = usage_ink(w.pct, brand);  // bar and percent in the brand colour until 80%
       label(u.f.f20, RELAX_LINE, w.label, X, cy, 72, LV_TEXT_ALIGN_LEFT);
-      bar(BX, cy, BW, 0x2a2c34);
+      bar(BX, cy, BW, BAR_TRACK);
       lv_obj_t *fill = bar(BX, cy, 10, ink);
       lv_anim_t a = make_anim(fill, [](void *o, int32_t v) { lv_obj_set_width((lv_obj_t *) o, v); }, 10,
-                              std::max<int>(10, BW * (int) std::min<uint32_t>(w.pct, 100) / 100), 500, 0,
+                              std::max<int>(10, BW * (int) std::min<uint32_t>(w.pct, 100) / 100), USAGE_BAR_MS, 0,
                               lv_anim_path_ease_out);
       lv_anim_start(&a);
       char pct[8];
       snprintf(pct, sizeof(pct), "%u%%", (unsigned) w.pct);
       label(u.f.f20, ink, pct, PX - 64, cy, 64, LV_TEXT_ALIGN_RIGHT);
-      label(u.f.f20, 0x7a7a86, w.reset, PX + 6, cy, 84, LV_TEXT_ALIGN_RIGHT);  // fits "47h 59m", the longest leftText()
+      label(u.f.f20, USAGE_RESET_INK, w.reset, PX + 6, cy, 84, LV_TEXT_ALIGN_RIGHT);  // fits "47h 59m", the longest leftText()
       y += ROW;
     }
     y += GAP;
@@ -197,13 +208,13 @@ inline void build_battery_page(lv_obj_t *root) {
   // Battery page (BOOT, after usage): ring + big %, values set in update().
   u.battery_page = mk_page(root, true, true);
   u.battery_ring = lv_arc_create(u.battery_page);
-  lv_obj_set_size(u.battery_ring, 340, 340);  // outer radius 170: arc-label glyphs reach in to ~185
+  lv_obj_set_size(u.battery_ring, BATTERY_RING_D, BATTERY_RING_D);
   lv_obj_center(u.battery_ring);
   lv_arc_set_rotation(u.battery_ring, 270);   // starts at 12 o'clock
   lv_arc_set_bg_angles(u.battery_ring, 0, 360);
   lv_arc_set_range(u.battery_ring, 0, 100);
-  lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_MAIN);
-  lv_obj_set_style_arc_width(u.battery_ring, 24, LV_PART_INDICATOR);
+  lv_obj_set_style_arc_width(u.battery_ring, BATTERY_RING_W, LV_PART_MAIN);
+  lv_obj_set_style_arc_width(u.battery_ring, BATTERY_RING_W, LV_PART_INDICATOR);
   lv_obj_set_style_arc_color(u.battery_ring, lv_color_hex(CARD_RIM), LV_PART_MAIN);
   lv_obj_remove_style(u.battery_ring, nullptr, LV_PART_KNOB);
   lv_obj_set_clickable(u.battery_ring, false);
@@ -224,7 +235,7 @@ inline void build_ota_page(lv_obj_t *root) {
     lv_obj_set_pos(o, (scene::W - OTA_BAR_W) / 2, scene::C + 50);
     return o;
   };
-  ota_rect(OTA_BAR_W, 0x2a2c34);
+  ota_rect(OTA_BAR_W, BAR_TRACK);
   u.ota_fill = ota_rect(OTA_BAR_MIN, provider_ink("Claude"));
 }
 

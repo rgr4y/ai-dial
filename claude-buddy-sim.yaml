@@ -274,7 +274,7 @@ interval:
             id(sim_voice_final_at) = 0;
             say("final", std::max(id(sim_voice_n), 0));
           }
-  - interval: 50ms  # the dial's IMU poll rate
+  - interval: ${frame_ms}ms  # the dial's IMU poll rate (buddy-ui.yaml UI tick)
     then:
       - lambda: |-
           float s = sinf(25 * 3.14159265f / 180);

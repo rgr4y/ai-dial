@@ -7,6 +7,8 @@
 
 substitutions:
   ui_root: lv_scr_act()
+  # One UI tick: the harness interval below, plus the IMU poll in claude-buddy.yaml and claude-buddy-sim.yaml.
+  frame_ms: "33"
 
 external_components:
   - source:
@@ -94,8 +96,8 @@ lvgl:
     - line: { hidden: true, points: [[0, 0], [1, 1]] }
 
 interval:
-  # Harness redraws code-drawn motion every 50 ms; pets step at 55-120 ms.
-  - interval: 50ms
+  # Harness redraws code-drawn motion every ${frame_ms} ms; pets step at 55-120 ms.
+  - interval: ${frame_ms}ms
     then:
       - lambda: |-
           // IMU gaze (buddy/gaze.h; fed by the dial's IMU, or the sim's arrow keys): eyes layer only.
