@@ -251,6 +251,49 @@ media_player:
       format: NONE  # every codec (the default, FLAC only, rejected MP3 with ESP_ERR_NOT_SUPPORTED)
       num_channels: 1  # the ES8311 is mono, so decode straight to mono
 
+esp32:
+  framework:
+    sdkconfig_options:
+      CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS: "y"  # idle-task run time, for the CPU Usage sensor
+
+debug:
+  update_interval: 5s
+
+sensor:
+  - platform: debug
+    free:
+      name: Heap Free
+    block:
+      name: Heap Max Block
+    min_free:
+      name: Heap Min Free
+    psram:
+      name: PSRAM Free
+    loop_time:
+      name: Loop Time
+  # CPU % = 1 - (idle task run time / wall time), averaged over both S3 cores, per update window.
+  # Counters are u32 microseconds; unsigned deltas survive the ~71 min wrap. CONFIG_PM_ENABLE scales the
+  # clock, so this is % of the current frequency, not of 240 MHz.
+  - platform: template
+    name: CPU Usage
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    state_class: measurement
+    entity_category: diagnostic
+    update_interval: 5s
+    lambda: |-
+      static uint32_t last_idle[2] = {0, 0}, last_t = 0;
+      const uint32_t t = (uint32_t) esp_timer_get_time();
+      const uint32_t dt = t - last_t;
+      uint32_t di = 0;
+      for (int c = 0; c < 2; c++) {
+        const uint32_t idle = ulTaskGetIdleRunTimeCounterForCore(c);
+        di += idle - last_idle[c];
+        last_idle[c] = idle;
+      }
+      last_t = t;
+      return dt ? 100.0f * (1.0f - (float) di / (2.0f * dt)) : NAN;
+
 number:
   - platform: template
     id: speaker_volume_percent
