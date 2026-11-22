@@ -28,6 +28,7 @@ struct Work {
 struct Notice {
   std::string sid, text, agent;
   Bot bot;
+  uint32_t at = 0;  // millis() it arrived (or the card's reply time); loop() drops it after NOTICE_MAX_AGE_MS
 };
 
 // The last {"evt":"voice"} line from the bridge: partial words (text), the final (final = true), or an error to show.
@@ -91,7 +92,8 @@ class ClaudeBuddy : public Component {
   // The reply on the card (last_text) becomes a notice, as if it had come in while other sessions worked. A voice
   // conversation's reply (`read`) is already read: it just leaves.
   void queue_last_reply() {
-    if (!this->last_read_) this->queue_notice({this->last_sid_, this->last_text_, this->last_agent_, this->last_bot_});
+    if (!this->last_read_)
+      this->queue_notice({this->last_sid_, this->last_text_, this->last_agent_, this->last_bot_, this->last_text_ms_});
   }
   void approve() { this->decide_("once"); }
   void deny() { this->decide_("deny"); }

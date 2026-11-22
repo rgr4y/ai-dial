@@ -11,6 +11,8 @@ namespace esphome::claude_buddy {
 
 static const char *const TAG = "claude_buddy";
 static constexpr uint32_t DEAD_MS = 30000;
+// A bell notice nobody opened in this long was read on the Mac or no longer matters: drop it.
+static constexpr uint32_t NOTICE_MAX_AGE_MS = 60 * 60 * 1000;
 
 bool ClaudeBuddy::live() const { return this->snap_.at_ms != 0 && millis() - this->snap_.at_ms < DEAD_MS; }
 
@@ -21,9 +23,19 @@ void ClaudeBuddy::loop() {
     ESP_LOGI(TAG, "Bridge %s", l ? "live" : "gone");
     this->notify_();
   }
+  auto &n = this->notices_;
+  uint32_t now = millis();
+  auto old = std::remove_if(n.begin(), n.end(), [now](const Notice &x) { return now - x.at > NOTICE_MAX_AGE_MS; });
+  if (old != n.end()) {
+    ESP_LOGI(TAG, "Dropped %u notice(s) older than 60 min", (unsigned) (n.end() - old));
+    n.erase(old, n.end());
+    this->notify_();
+  }
 }
 
 void ClaudeBuddy::queue_notice(Notice n) {
+  if (!n.at)
+    n.at = millis();
   if (this->notices_.size() >= 9)
     this->notices_.erase(this->notices_.begin());
   this->notices_.push_back(std::move(n));
