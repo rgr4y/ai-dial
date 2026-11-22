@@ -51,6 +51,7 @@ voice:  # the router's "assistant" target types into this session; absent = the 
 
 flash: dialip
 	@mkdir -p build
+	trap 'exit 130' INT; \
 	ip=$(or $(DIAL),$$(cat .env.dialip)); \
 	esphome run claude-buddy.yaml --device $$ip --no-logs 2>&1 | tee build/flash.log; \
 	if grep -q "OTA successful" build/flash.log; then echo "$$ip" > .env.dialip; msg="OTA successful"; rc=0; \
