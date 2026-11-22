@@ -12,14 +12,14 @@
     {
       "label": "ESPHome: Run (OTA)",
       "type": "shell",
-      "command": "esphome run \"${file}\" --device OTA",
+      "command": "esphome run claude-buddy.yaml --device OTA",
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     },
     {
       "label": "ESPHome: Logs (OTA)",
       "type": "shell",
-      "command": "esphome logs \"${file}\" --device OTA",
+      "command": "esphome logs claude-buddy.yaml --device OTA",
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated", "clear": true }
     }
