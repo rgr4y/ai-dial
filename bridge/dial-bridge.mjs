@@ -395,8 +395,10 @@ function onEvent(ev) {
   if (!ev.agent) ev.session_name ??= sessionName(ev.transcript_path);  // Claude Code only: others have no transcript title
   const r = board.event(ev, Date.now());
   if (r.cleared && waiters.has(r.cleared)) waiters.get(r.cleared)(null);
-  // A new prompt (typed at the keyboard or by voice) makes that session's older replies stale on the dial.
-  if (ev.hook_event_name === 'UserPromptSubmit' && ev.session_id) sendLine({ evt: 'seen', sid: ev.session_id });
+  // A new prompt (typed at the keyboard or by voice) or the session ending (exit, /clear, /resume) makes that session's
+  // older replies stale on the dial.
+  if ((ev.hook_event_name === 'UserPromptSubmit' || ev.hook_event_name === 'SessionEnd') && ev.session_id)
+    sendLine({ evt: 'seen', sid: ev.session_id });
   if (r.turn) {
     const read = takeTalked(r.sid);  // a reply to a voice send: shown now, never queued to the bell
     sendLine({ evt: 'turn', role: 'assistant', content: [{ type: 'text', text: r.turn }], sid: r.sid,
