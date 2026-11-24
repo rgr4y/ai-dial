@@ -42,6 +42,16 @@ test('oldest waiting prompt is shown; stale working sessions go idle', () => {
   assert.equal(b.heartbeat(3000 + STALE_MS + 1).running, 0);
 });
 
+test('the working leash is a tool-scale window, not half an hour', () => {
+  // A single tool use must not pin the dial past a tool's own timeout: a minute of silence still reads working,
+  // STALE_MS clears it. Keeps a wedged session (bare gate call, dead agent) from lingering.
+  assert.equal(STALE_MS, 2 * 60 * 1000);
+  const b = new Board();
+  b.event(ev('PreToolUse', { tool_name: 'Bash' }), 1000);  // a lone gated tool, no Stop behind it
+  assert.equal(b.heartbeat(1000 + 60000).running, 1);
+  assert.equal(b.heartbeat(1000 + STALE_MS + 1).running, 0);
+});
+
 test('a session made only of a prompt is dropped when the prompt closes; a real one keeps working', () => {
   const b = new Board();
   const id = b.openPrompt({ ...ev('PermissionRequest', { tool_name: 'Bash' }), session_id: 'curl' }, 1000);

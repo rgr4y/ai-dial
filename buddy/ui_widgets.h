@@ -201,7 +201,15 @@ inline void arc_text(lv_obj_t *a, const char *text, uint32_t color, bool shimmer
 
 // State changes in power.h; the shield follows them here.
 inline void set_asleep(bool z) {
-  if (ui().set_asleep(z)) show(ui().shield, z);
+  if (!ui().set_asleep(z)) return;
+  show(ui().shield, z);
+  // Raise to wake (buddy/raise_wake.h): on the sleep edge relearn where the dial rests (reset() also drops a raise
+  // armed as it went dark) and start the IMU at the idle poll rate.
+  if (z) {
+    raise_wake::reset();
+    ui().poll_fast = false;
+    if (ui().on_poll) ui().on_poll(false);
+  }
 }
 inline void activity(uint32_t now) {
   if (ui().activity(now)) show(ui().shield, false);

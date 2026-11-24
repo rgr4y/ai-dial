@@ -7,6 +7,11 @@
 substitutions:
   name: claude-buddy
   friendly_name: Claude Buddy
+  # Raise to wake (buddy/raise_wake.h): while the screen is dark the IMU keeps sampling so a nudge on battery, or a
+  # pickup, can wake it. It idles at dark_poll_ms (2 Hz: cheap, still sees a nudge) and the UI tick speeds it to
+  # fast_poll_ms only while the dial moves, then back. Nothing here while awake: the screen tick drives the rate.
+  dark_poll_ms: "500"
+  fast_poll_ms: "50"
   # Audio (from docs/esp32-dial.yaml). 16 kHz: voice_assistant needs a 16 kHz mic, and the mic and speaker share one
   # full-duplex I2S bus (one rate for both), so sounds play at 16 kHz. The slider (1-100) maps linearly onto the usable range: below volume_min it's
   # inaudible, above volume_max it distorts. ES8311 reg 0x32: 0.75 = 0dB (0xBF), each 0.01 is about 1dB. 0 = mute.
@@ -35,6 +40,10 @@ esphome:
         - script.execute:
             id: apply_current_volume
             displayed_volume: !lambda "return id(speaker_volume_percent).state;"
+        - media_player.speaker.play_on_device_media_file:
+            id: player
+            media_file: snd_boot
+            announcement: true
     - priority: -150  # after buddy-ui.yaml's init
       then:
         - lambda: |-
@@ -43,8 +52,14 @@ esphome:
               return std::isnan(id(bat_level).state) ? -1 : (int) id(bat_level).state;
             };
             buddyui::ui().on_usb = []() { return id(pmu).isVbusIn(); };
+            // Dark poll rate: slow at rest (dark_poll_ms), fast (fast_poll_ms) while the dial moves, so a nudge is
+            // confirmed quickly without sampling an idle desk quickly (buddy/ui.h tick(), raise_wake::moving()).
+            buddyui::ui().on_poll = [](bool fast) {
+              id(imu)->set_update_interval(fast ? ${fast_poll_ms} : ${dark_poll_ms});
+            };
+            // One IMU sample: eyes follow the tilt, and a nudge/pickup arms a wake (buddy/ui.h motion()).
             id(imu)->add_listener([](const motion::MotionData &d) {
-              gaze::update(d.acceleration[0], d.acceleration[1], d.acceleration[2], millis());
+              buddyui::motion(d.acceleration[0], d.acceleration[1], d.acceleration[2], millis());
             });
             // Hold the face (buddy/ui.h on_hold): the dial streams mic audio to the bridge, which is the voice_assistant's
             // API client. No subscriber (bridge down, or Home Assistant got there first) = no start.
@@ -115,10 +130,16 @@ motion:
 lvgl:
   on_pause:
     - lambda: |-
-        id(imu)->stop_poller();
         gaze::reset();
+        raise_wake::reset();
+        // Dark: keep sampling so a nudge on battery, or a pickup, can wake the screen (buddy/raise_wake.h). The UI
+        // tick idles this at dark_poll_ms and speeds it to frame_ms only while the dial moves (on_poll below).
+        id(imu)->set_update_interval(${dark_poll_ms});
+        id(imu)->start_poller();
   on_resume:
-    - lambda: id(imu)->start_poller();
+    - lambda: |-
+        id(imu)->set_update_interval(${frame_ms});
+        id(imu)->start_poller();
 
 # ---- CPU speed. dial-hardware.yaml scales 240/80/40 MHz; on its own LVGL draws at 40 (it takes no PM lock). Hold a
 # CPU_FREQ_MAX lock (240) while the screen is on and either USB is in or the dial booted under 120 s ago. Dark, or on
@@ -143,6 +164,15 @@ interval:
           held = want;
           ESP_LOGI("power", "CPU %s (screen %s, usb %d, up %us)", want ? "240 MHz" : "scaling",
                    buddyui::ui().asleep ? "dark" : "on", usb, (unsigned) (millis() / 1000));
+      # Dark: a USB plug/unplug flips the raise threshold (nudge vs pickup). The poller keeps running either way, so
+      # just relearn the resting direction and drop a raise armed mid-plug.
+      - lambda: |-
+          if (!buddyui::ui().asleep) return;
+          bool usb = id(pmu).isVbusIn();
+          static bool was = false;
+          if (usb == was) return;
+          was = usb;
+          raise_wake::reset();
 
 # ---- Audio: ES8311 DAC -> NS4150B amp, ES7210 ADC (mic data GPIO10) on the same I2S bus ----
 # Speaker, mixer, resamplers and media player from docs/esp32-dial.yaml (no boot stream). Mixer and resampler layout
@@ -237,6 +267,8 @@ media_player:
         file: assets/sounds/on_stt_end_16k_mono.wav
       - id: snd_error
         file: assets/sounds/on_error_16k_mono.wav
+      - id: snd_boot  # Windows 98 startup, edge silence trimmed
+        file: assets/sounds/boot_16k_mono.wav
     name: Speaker  # named: an unnamed entity is internal (cv.py), and the bridge needs it over the API for /speak
     # Read buffer per pipeline, in PSRAM. The old dial config used 2MB for its MP3 stream; 512KB each here, since the
     # character pack also lives in PSRAM.
@@ -345,4 +377,21 @@ switch:
       number: GPIO46
       ignore_strapping_warning: true  # board wiring: amp enable
     restore_mode: ALWAYS_ON  # always on; the silence loop keeps the DAC fed so it doesn't pick up RF
+  # Diagnostic: hold the screen on (the idle timeout never fires; the PWR key still turns it off). Turning it on wakes a
+  # dark screen.
+  - platform: template
+    id: stay_awake
+    name: Stay Awake
+    icon: mdi:sleep-off
+    entity_category: diagnostic
+    optimistic: true
+    restore_mode: RESTORE_DEFAULT_OFF
+    turn_on_action:
+      - lambda: |-
+          buddyui::ui().stay_awake = true;
+          buddyui::activity(millis());
+    turn_off_action:
+      - lambda: |-
+          buddyui::ui().activity(millis());  // restart the idle clock, don't sleep the moment it's off
+          buddyui::ui().stay_awake = false;
 

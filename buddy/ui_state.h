@@ -13,6 +13,7 @@
 
 #include "character.h"
 #include "power.h"
+#include "raise_wake.h"
 #include "scene.h"
 #include "sessions.h"
 #include "esphome/core/defines.h"
@@ -203,6 +204,8 @@ namespace buddyui
         lv_obj_t *shield = nullptr;   // while dark: eats touches so a wake tap can't hit Allow
         std::function<int()> battery; // YAML: battery % when a cell is connected (also while charging), -1 otherwise
         std::function<bool()> on_usb; // YAML: true when VBUS is present; unset = battery rules
+        std::function<void(bool)> on_poll; // YAML: IMU poll fast (true) / idle slow (false) while dark; unset = fixed
+        bool poll_fast = false;            // last rate asked for (so tick() only calls on_poll on a change)
         bool was_live = false;        // the bridge has talked since boot (splash says "offline", not "looking")
         std::string arc_txt[2];
         uint32_t arc_col[2] = {0, 0};

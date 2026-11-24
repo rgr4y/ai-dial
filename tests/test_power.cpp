@@ -93,6 +93,10 @@ int main() {
   assert(!idle.idle_due(1000 + SL + 1, 5000, SL, USL, true, false));
   assert(!idle.idle_due(1000 + USL, 5000, SL, USL, true, false));
   assert(idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, false));
+  idle.stay_awake = true;  // diagnostic override: never due, on battery or USB
+  assert(!idle.idle_due(1000 + USL + 1, 5000, SL, USL, false, false));
+  assert(!idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, false));
+  idle.stay_awake = false;
   assert(!idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, true));
   idle.set_asleep(true);
   assert(!idle.idle_due(1000 + USL + 1, 5000, SL, USL, true, false));  // already asleep

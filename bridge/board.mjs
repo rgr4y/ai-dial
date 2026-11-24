@@ -7,7 +7,10 @@
 
 import { basename } from 'node:path';
 
-export const STALE_MS = 30 * 60 * 1000;   // a working session silent this long is shown idle
+export const STALE_MS = 2 * 60 * 1000;    // a working session silent this long is shown idle (a tool's own timeout scale:
+                                          // real tools run to ~150 s and intra-turn gaps reach ~30 s, so 2 min covers a
+                                          // live tool while a wedged session — e.g. a dead agent, or a bare gate call with
+                                          // no Stop behind it — clears in minutes, not half an hour)
 export const FORGET_MS = 6 * 60 * 60 * 1000; // dropped entirely after this
 
 const WORKING_EVENTS = new Set(['UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'PostToolUseFailure',

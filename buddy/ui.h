@@ -7,6 +7,7 @@
 #include "ui_voice.h"
 #include "ui_pages.h"
 #include "ui_face.h"
+#include "gaze.h"
 
 namespace buddyui {
 
@@ -375,10 +376,28 @@ inline void update(uint32_t now) {
   paint_face(vis, f);
 }
 
+// One IMU sample in screen axes, from the dial's qmi8658 listener or the sim's fake IMU. Steers the eye gaze and
+// feeds raise_wake (buddy/raise_wake.h). Called whether the screen is dark or not: the poller keeps running while
+// dark so a nudge can wake us, and this is the only side that knows USB state (which picks the raise threshold).
+inline void motion(float ax, float ay, float az, uint32_t now) {
+  Ui &u = ui();
+  gaze::update(ax, ay, az, now);
+  raise_wake::feed(ax, ay, az, u.on_usb && u.on_usb(), now);
+}
+
 // 50 ms tick (the Harness code-drawn motion tick): advance pets, rerun state for the stopwatch and timeouts.
 inline void tick(uint32_t now) {
   Ui &u = ui();
   if (!u.root) return;
+  // Raise to wake (buddy/raise_wake.h): a nudge of the dial lights it. Always consumed (a raise while awake must not
+  // linger and fire the moment it sleeps), acted on only while dark.
+  if (raise_wake::take_raise() && u.asleep) activity(now);
+  // Dark: idle the IMU poll slow, and speed it up while the dial moves, so a nudge is confirmed in a sample or two
+  // without sampling an idle desk at the fast rate (raise_wake::moving() holds a moment after the last motion).
+  if (u.asleep && u.on_poll) {
+    bool fast = raise_wake::moving();
+    if (fast != u.poll_fast) u.poll_fast = fast, u.on_poll(fast);
+  }
   // Dark: LVGL is paused (YAML), so skip the per-frame animation work; state still updates once a second.
   if (!u.asleep) {
     u.scene.tick(now);

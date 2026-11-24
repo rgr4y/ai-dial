@@ -13,6 +13,7 @@ struct Screen {
   uint32_t woke_at = 0;                          // last sleep -> wake edge (0 = boot)
   uint32_t usb_since = 0;                        // last plug-in edge
   bool usb_was = false;
+  bool stay_awake = false;                       // diagnostic override: the idle timeout never fires (PWR still sleeps)
 
   // True when the state changed. Only the latest edge stays pending: sleep then wake in one tick must not leave
   // both requests for the YAML, which would fade out and pause LVGL while awake.
@@ -36,7 +37,7 @@ struct Screen {
   // this is due on the next tick (battery rules).
   bool idle_due(uint32_t now, uint32_t boot_awake_ms, uint32_t sleep_ms, uint32_t usb_sleep_ms, bool on_usb,
                 bool busy) const {
-    if (asleep || now <= boot_awake_ms || (on_usb && busy)) return false;
+    if (stay_awake || asleep || now <= boot_awake_ms || (on_usb && busy)) return false;
     return now - last_activity > (on_usb ? usb_sleep_ms : sleep_ms);
   }
   // Call every tick. Boot already on USB counts as a plug-in at that tick.

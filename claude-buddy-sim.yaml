@@ -6,7 +6,7 @@
 # The bridge drives it like the dial over the native API on 127.0.0.1:6053: add 127.0.0.1 to DIAL_HOST.
 # Pets load straight from bridge/assets ($DIAL_ASSETS overrides), no LittleFS or sync.
 # Mouse = touch. PWR / BOOT: click the keys on the case edge, or press p / b with the window focused.
-# Battery stand-in (no PMU here): [ / ] = battery -10 / +10 %, u = toggle USB power.
+# Battery stand-in (no PMU here): [ / ] = battery -10 / +10 %, u = toggle USB power, n = nudge (raise to wake).
 
 substitutions:
   name: claude-buddy-sim
@@ -67,6 +67,9 @@ esphome:
         - lambda: |-
             buddyui::ui().battery = []() { return id(sim_bat); };
             buddyui::ui().on_usb = []() { return id(sim_usb); };
+            // The dial sets the IMU poll rate from the UI tick (on_poll); the sim's fake IMU reads the same flag so
+            // a dark idle desk is sampled slowly (see the interval below).
+            buddyui::ui().on_poll = [](bool fast) { id(sim_imu_fast) = fast; };
             // No mic here: holding the face fakes the bridge. Words arrive every 400 ms while held; 700 ms after the
             // release comes the final (empty if released at once = "Didn't catch that"). The interval below feeds them.
             buddyui::ui().on_voice = [](bool on) -> bool {
@@ -196,6 +199,8 @@ globals:
   - { id: sim_voice_final_at, type: uint32_t, initial_value: "0" }
   - { id: sim_bat, type: int, initial_value: "80" }
   - { id: sim_usb, type: bool, initial_value: "false" }
+  - { id: sim_nudge_until, type: uint32_t, initial_value: "0" }
+  - { id: sim_imu_fast, type: bool, initial_value: "false" }
 
 binary_sensor:
   - { platform: sdl, id: btn_boot, key: SDLK_b }
@@ -221,6 +226,13 @@ binary_sensor:
       - lambda: |-
           id(sim_usb) = !id(sim_usb);
           ESP_LOGI("sim", "battery %d%% usb %d", id(sim_bat), id(sim_usb));
+  # Raise to wake: arrow keys are sustained tilts (the baseline settles under them), so a tap is the nudge. This key
+  # fires one in the air instead: a brief tilt for ~220 ms, then flat, the shape of a real nudge.
+  - platform: sdl
+    id: btn_nudge
+    key: SDLK_n
+    on_press:
+      - lambda: id(sim_nudge_until) = millis() + 220;
 
   # Fake IMU: arrow keys tip the dial 25 deg that way while held, or drag with the right mouse button: the dial tips
   # toward the pointer, up to 40 deg at the glass edge (the left button stays the touchscreen). The dial's qmi8658:
@@ -277,12 +289,19 @@ interval:
   - interval: ${frame_ms}ms  # the dial's IMU poll rate (buddy-ui.yaml UI tick)
     then:
       - lambda: |-
+          // Mimic the dial: while dark and idle, sample slowly (500 ms); fast when the UI tick asks (on_poll) or awake.
+          static uint32_t last_idle = 0;
+          bool slow = buddyui::ui().asleep && !id(sim_imu_fast);
+          if (slow && millis() - last_idle < 500) return;
+          last_idle = millis();
           float s = sinf(25 * 3.14159265f / 180);
           float ax = s * (id(tilt_r).state - id(tilt_l).state), ay = s * (id(tilt_d).state - id(tilt_u).state);
+          if (millis() < id(sim_nudge_until)) ax = sinf(30 * 3.14159265f / 180);  // n: a brief tilt, then flat
           int mx, my;
           if (SDL_GetMouseState(&mx, &my) & SDL_BUTTON_RMASK) {
             float k = sinf(40 * 3.14159265f / 180) / 233;  // window px from the glass centre -> sin(tilt)
             ax = fmaxf(-0.9f, fminf(0.9f, (mx - sim_keys::C) * k));
             ay = fmaxf(-0.9f, fminf(0.9f, (my - sim_keys::C) * k));
           }
-          gaze::update(ax, ay, sqrtf(fmaxf(0, 1 - ax * ax - ay * ay)), millis());
+          // Same IMU path as the dial (buddy/ui.h motion()): eyes follow, and a nudge arms a raise to wake.
+          buddyui::motion(ax, ay, sqrtf(fmaxf(0, 1 - ax * ax - ay * ay)), millis());

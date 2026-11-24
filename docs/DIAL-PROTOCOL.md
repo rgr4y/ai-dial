@@ -28,6 +28,26 @@ session (`Board.tty(session_id)`) so voice can type into that terminal; it never
 nothing, and Claude Code shows its own prompt as usual. It also shows that prompt while the hook waits, and
 whichever answer comes first wins.
 
+### Copilot (VS Code) has no PermissionRequest hook
+
+VS Code's Copilot Chat fires only the busy events (its extension calls its hook runner for
+`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`, subagent/precompact) — never a permission
+hook: the allow/deny prompt is handled in-process by the extension, not by shelling out. So the dial cannot be the
+approver via `PermissionRequest`.
+
+Instead, `hook.sh copilot-gate` (installed for `PreToolUse` in `~/.copilot/hooks/dial-bridge.json`, the location VS
+Code's `chat.hookFilesLocations` reads; the CLI's `~/.copilot/settings.json` is a different file) puts the dial in the
+loop at `PreToolUse`:
+
+- It always posts the busy event (agent `copilot`).
+- For a *mutating* tool (`bash`, `write`, `edit`, `apply_patch`, …) it also holds on `POST /permission` and answers
+  `{"hookSpecificOutput":{"hookEventName":"PreToolUse","permissionDecision":"allow"|"deny"}}`. VS Code honours that
+  (`resolveAutoConfirmFromHook`): `allow` auto-confirms, `deny` blocks.
+- Read-only tools (`view`, `glob`, `rg`, …) pass straight through, so the dial is not prompted for every search.
+
+Payloads differ by surface and the gate normalises both: VS Code's extension sends Claude-shaped
+`{hook_event_name,tool_name,tool_input}`, the Copilot CLI sends camelCase `{toolType:camelCase, toolCalls:[{name,args}]}`.
+
 ## 2. Bridge → dial (ESPHome native API action `buddy_line(line: string)`)
 
 Each line is one Claude desktop Hardware Buddy JSON object
