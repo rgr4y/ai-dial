@@ -6,3 +6,8 @@ secrets.yaml
 build/
 .env.dialip
 .beads
+
+# Local only: Harness flash dump (not ours to redistribute), Waveshare SDK clone, session notes
+docs/firmware-backup/
+docs/ESP32-S3-Touch-AMOLED-1.75C/
+PROGRESS.md

@@ -15,4 +15,4 @@ Teardown notes for the Autonomous "Harness" device (a Waveshare ESP32-S3-Touch-A
   - UI package shared with the simulator: `buddy-ui.yaml`. Simulator: `claude-buddy-sim.yaml` (ESPHome `host` +
     SDL, the same C++ UI): `make sim`.
   - Tests: `make test` (`test:cpp`: host C++ `tests/test_*.cpp`: scene maths, PWR sleep/wake + sim key hit-test; `test:node`: bridge `node --test`).
-- `firmware-backup/` holds the full 32 MB dump of the original Harness firmware, with the restore command.
+- `docs/firmware-backup/` (local only, gitignored) holds the full 32 MB dump of the original Harness firmware, with the restore command.
