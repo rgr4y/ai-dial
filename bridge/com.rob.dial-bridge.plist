@@ -13,16 +13,16 @@
 	<string>com.rob.dial-bridge</string>
 	<key>ProgramArguments</key>
 	<array>
-		<string>/opt/homebrew/bin/node</string>
-		<string>/Users/rob/workspace/autonomous-ai/bridge/dial-bridge.mjs</string>
+		<string>@NODE@</string>
+		<string>@REPO@/bridge/dial-bridge.mjs</string>
 	</array>
 	<key>RunAtLoad</key>
 	<true/>
 	<key>StandardErrorPath</key>
-	<string>/Users/rob/Library/Logs/dial-bridge.log</string>
+	<string>@HOME@/Library/Logs/dial-bridge.log</string>
 	<key>StandardOutPath</key>
-	<string>/Users/rob/Library/Logs/dial-bridge.log</string>
+	<string>@HOME@/Library/Logs/dial-bridge.log</string>
 	<key>WorkingDirectory</key>
-	<string>/Users/rob/workspace/autonomous-ai/bridge</string>
+	<string>@REPO@/bridge</string>
 </dict>
 </plist>

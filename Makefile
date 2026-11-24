@@ -6,6 +6,8 @@
 #   test:node  the bridge's npm test (node --test)
 # make flash   build and OTA the dial (DIAL=ip overrides; else .env.dialip, last good IP, found via mDNS if empty).
 #              Posts the result to the notify channel (.claude/channel/notify.ts) if a Claude session runs it.
+# make bridge-install  render bridge/com.rob.dial-bridge.plist for this user/checkout into ~/Library/LaunchAgents and (re)load it.
+#              Extra env (ANTHROPIC_API_KEY, ...) comes from bridge/.env (KEY=VALUE lines, gitignored).
 # make voice   start the voice assistant (tmux session "voice": claude in ~/workspace/voice-assistant) if absent.
 # Pets load from bridge/assets (DIAL_ASSETS overrides). Logs land in build/*.log as well as the terminal.
 
@@ -15,7 +17,7 @@ export DIAL_ASSETS
 SHELL := /bin/bash
 .SHELLFLAGS := -o pipefail -c  # tee must not hide a failed build
 
-.PHONY: sim sim-panel voice flash dialip test test\:cpp test\:node logs
+.PHONY: sim sim-panel bridge-install voice flash dialip test test\:cpp test\:node logs
 # .env.dialip empty or missing: look the dial up on the network and record it. Otherwise nothing to do.
 dialip:
 	@[ -s .env.dialip ] || { ip=$$(scripts/find-dial.sh) && echo "$$ip" > .env.dialip && echo "dial at $$ip (.env.dialip)"; }
@@ -62,3 +64,13 @@ flash: dialip
 logs: dialip
 	ip=$(or $(DIAL),$$(cat .env.dialip)); \
 	esphome logs claude-buddy.yaml --device $$ip --no-states
+
+bridge-install:  # plist paths are placeholders; launchd can't expand $HOME, so fill them in here
+	@dst=$(HOME)/Library/LaunchAgents/com.rob.dial-bridge.plist; \
+	node=$$(command -v node) || { echo "node not on PATH"; exit 1; }; \
+	sed -e "s|@REPO@|$(CURDIR)|g" -e "s|@HOME@|$(HOME)|g" -e "s|@NODE@|$$node|g" bridge/com.rob.dial-bridge.plist > "$$dst"; \
+	if [ -f bridge/.env ]; then while IFS== read -r k v; do [[ -z "$$k" || "$$k" == \#* ]] && continue; \
+	  plutil -replace "EnvironmentVariables.$$k" -string "$$v" "$$dst" && echo "env $$k from bridge/.env"; \
+	done < bridge/.env; fi; \
+	launchctl bootout gui/$$(id -u)/com.rob.dial-bridge 2>/dev/null || true; \
+	launchctl bootstrap gui/$$(id -u) "$$dst" && echo "installed and loaded $$dst"

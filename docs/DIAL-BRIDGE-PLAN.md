@@ -39,7 +39,7 @@ claude-control (Node) ── sessions + status ── src/lib/dial.ts ── hea
 2. **Shim (`~/.dial-shim/peon.sh`), 3 lines.**
    - It tees stdin into the real `peon.sh` and into claude-control's `status-hook.sh`.
    - Each agent's adapter command gets `CLAUDE_PEON_DIR=~/.dial-shim`. Codex example:
-     `notify = ["env", "CLAUDE_PEON_DIR=/Users/rob/.dial-shim", "bash", ".../adapters/codex.sh"]`.
+     `notify = ["env", "CLAUDE_PEON_DIR=/Users/<you>/.dial-shim", "bash", ".../adapters/codex.sh"]`.
    - No peon-ping file is modified, so its updates don't clobber this.
    - The claude-control hook keys files by `$PPID`; for adapters that is the adapter's shell. Check that this
      still gives one stable file per agent session (otherwise key by `session_id`).

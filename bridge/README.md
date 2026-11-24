@@ -17,14 +17,14 @@ prompts from it, over Wi-Fi. Protocol: [`../docs/DIAL-PROTOCOL.md`](../docs/DIAL
   `node install.mjs --uninstall`.
 - `peon-shim/peon.sh`: feeds peon-ping adapters (Codex, Cursor, Gemini, …) to both peon-ping and the bridge.
 - `assets/`: character packs from `../scripts/gen_buddy_pets.mjs` (regenerated on every ESPHome compile).
-- `com.rob.dial-bridge.plist`: the LaunchAgent. Logs go to `~/Library/Logs/dial-bridge.log`.
+- `com.rob.dial-bridge.plist`: the LaunchAgent template (`@REPO@`, `@HOME@`, `@NODE@` filled in by `make bridge-install`). Logs go to `~/Library/Logs/dial-bridge.log`.
 
 ## Run
 
 ```bash
 npm install
 node install.mjs                                    # Claude Code, Codex and Copilot CLI hooks
-cp com.rob.dial-bridge.plist ~/Library/LaunchAgents/ && launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.rob.dial-bridge.plist
+make -C .. bridge-install                           # LaunchAgent: fills in this checkout's paths, env from bridge/.env
 npm run sim                                         # desktop simulator (SDL window), see below
 ```
 
@@ -56,7 +56,7 @@ control iTerm (Automation); the bridge runs under launchd, so approve it for tha
 **Router.** Each final transcript goes through `router.mjs`. Rules first, no model: "tell api to ...", "api, ..." or a
 leading session name types the rest into that session (spoken names match ignoring case, spaces and hyphens: "auto ai" =
 `auto-ai`); a bare allow/yes or deny/no with exactly one open prompt answers it. Anything else is one `/v1/messages`
-call through cli-proxy-api (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`: env only, never in a file; model
+call through cli-proxy-api (`ANTHROPIC_BASE_URL`, `ANTHROPIC_API_KEY`: env only, set in gitignored `bridge/.env`; model
 `VOICE_ROUTER_MODEL`, default `gemini-3-flash`, ~1 s) asking for JSON `{target, text}`: a session name, `focused`, or
 `assistant`. `assistant` types into the tmux session `voice` (`make voice` starts `claude` in `~/workspace/voice-assistant`,
 whose CLAUDE.md tells it how to read `GET /status` and reach other sessions); not running = card "Assistant offline", never
@@ -96,8 +96,9 @@ bridge shows Claude only, via `~/.claude/refresh-usage.sh`.
 
 Point the agent's peon-ping adapter at the shim. Codex, in `~/.codex/config.toml`:
 ```toml
-notify = ["env", "CLAUDE_PEON_DIR=/Users/rob/workspace/autonomous-ai/bridge/peon-shim", "bash",
-          "/Users/rob/.claude/hooks/peon-ping/adapters/codex.sh"]
+# TOML doesn't expand ~ or $HOME: use your absolute paths
+notify = ["env", "CLAUDE_PEON_DIR=/path/to/autonomous-ai/bridge/peon-shim", "bash",
+          "/Users/<you>/.claude/hooks/peon-ping/adapters/codex.sh"]
 ```
 This isn't wired yet: your Codex `notify` already chains Computer Use and oh-my-codex. Codex's notify fires after
 the fact, so its sessions get status only, with no approvals from the dial.

@@ -11,3 +11,4 @@ build/
 docs/firmware-backup/
 docs/ESP32-S3-Touch-AMOLED-1.75C/
 PROGRESS.md
+bridge/.env
